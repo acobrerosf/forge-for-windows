@@ -31,6 +31,25 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
 | `c` / `w` | in a log: copy / save to Downloads |
 | `,` | settings |
 
+## Install
+
+You need the [.NET 10 SDK](https://dotnet.microsoft.com/download) to build. It isn't needed to run the installed app.
+
+```powershell
+git clone https://github.com/acobrerosf/forge-for-windows.git
+cd forge-for-windows
+powershell -ExecutionPolicy Bypass -File tools\install.ps1 -Build
+```
+
+The script installs for the current user only, with no admin rights:
+
+- it copies the app to `%LOCALAPPDATA%\Programs\ForgeForWindows`;
+- it adds a **Forge for Windows** Start menu shortcut;
+- it starts the app.
+
+To update, run `git pull` and then run the same install command again; your accounts and tokens are kept.
+To remove the app, run `tools\uninstall.ps1`. Add `-Purge` to also delete your settings and stored tokens.
+
 ## Setup
 
 1. Create a token at <https://forge.laravel.com/profile/api>. Read access to servers and sites is enough
