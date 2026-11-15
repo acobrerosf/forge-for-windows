@@ -36,6 +36,7 @@ public sealed partial class SettingsWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TitleBarArea);
         SystemBackdrop = new MicaBackdrop();
+        Title = AppTitle.Text = "Forge for Windows" + AppProfile.Label + " · Settings";
         var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "forge.ico");
         if (File.Exists(icon))
         {
@@ -58,7 +59,15 @@ public sealed partial class SettingsWindow : Window
         AddPath("Settings", _service.SetupPath);
         AddPath("Log", Log.Path);
         AddPath("Tokens", $"Credential Manager › Windows Credentials › {WindowsCredentialStore.TargetPrefix}<account>");
-        AddPath("Start-up entry", @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ForgeForWindows");
+        AddPath("Start-up entry", AppProfile.IsDefault
+            ? @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ForgeForWindows"
+            : $"None: the {AppProfile.Name} profile never starts with Windows");
+        if (!AppProfile.IsDefault)
+        {
+            // Only the installed app may own the start-up entry.
+            StartupSwitch.IsEnabled = false;
+            ToolTipService.SetToolTip(StartupSwitch, $"Not available in the {AppProfile.Name} profile");
+        }
 
         LoadSettings();
         RenderAccounts();

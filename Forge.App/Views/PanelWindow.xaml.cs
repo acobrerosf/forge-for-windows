@@ -455,7 +455,7 @@ public sealed partial class PanelWindow : Window
     {
         var rows = new List<RowItem>();
         var now = NowMs;
-        SetHero("", snap.Orgs.Count == 1 ? snap.Orgs[0].Label : "Forge", "", null);
+        SetHero("", (snap.Orgs.Count == 1 ? snap.Orgs[0].Label : "Forge") + Forge.Core.Setup.AppProfile.Label, "", null);
 
         if (snap.NeedsSetup)
         {

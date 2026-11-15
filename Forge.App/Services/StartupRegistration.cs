@@ -19,6 +19,9 @@ internal static class StartupRegistration
     /// <summary>Makes the Run key match the setting, and points it at this exe if the app moved.</summary>
     public static void Sync(bool enabled)
     {
+        // The Run value is the installed app's; a development profile pointing it at a build folder
+        // would make Windows start the wrong copy at sign-in.
+        if (!Forge.Core.Setup.AppProfile.IsDefault) return;
         try
         {
             using var key = Registry.CurrentUser.CreateSubKey(RunKey, writable: true);

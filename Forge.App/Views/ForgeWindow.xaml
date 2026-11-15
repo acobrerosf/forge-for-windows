@@ -74,7 +74,7 @@
                 <ColumnDefinition x:Name="CaptionInset" Width="138" />
             </Grid.ColumnDefinitions>
             <Image x:Name="TitleIcon" Width="16" Height="16" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1" Text="Forge for Windows" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
+            <TextBlock Grid.Column="1" x:Name="AppTitle" Text="Forge for Windows" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
             <AutoSuggestBox Grid.Column="2" x:Name="SearchBox" PlaceholderText="Search servers and sites" QueryIcon="Find"
                             Width="420" HorizontalAlignment="Center" VerticalAlignment="Center"
                             TextChanged="SearchBox_TextChanged" QuerySubmitted="SearchBox_QuerySubmitted"

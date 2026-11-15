@@ -34,7 +34,7 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <Image x:Name="TitleIcon" Width="16" Height="16" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1" Text="Forge for Windows · Settings" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
+            <TextBlock Grid.Column="1" x:Name="AppTitle" Text="Forge for Windows · Settings" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
         </Grid>
 
         <NavigationView Grid.Row="1" x:Name="Nav" PaneDisplayMode="Left" IsSettingsVisible="False" IsBackButtonVisible="Collapsed"

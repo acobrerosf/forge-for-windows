@@ -427,3 +427,18 @@ public class WindowsCredentialStoreTests
     public void Part_count_is_read_from_the_first_comment(string? comment, int expected) =>
         Assert.Equal(expected, Forge.Core.Secrets.WindowsCredentialStore.PartsFromComment(comment));
 }
+
+public class ProfileTests
+{
+    [Theory]
+    [InlineData("dev", "dev")]
+    [InlineData(" Dev ", "dev")]
+    [InlineData("default", "")]
+    [InlineData("DEFAULT", "")]
+    [InlineData("", "")]
+    [InlineData(null, "")]
+    [InlineData("my test/../x", "mytestx")]
+    [InlineData("qa-2", "qa-2")]
+    public void Profile_names_are_safe_for_folders_and_credentials(string? requested, string expected) =>
+        Assert.Equal(expected, AppProfile.Clean(requested));
+}

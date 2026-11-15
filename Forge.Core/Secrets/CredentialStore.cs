@@ -26,7 +26,8 @@ public interface ICredentialStore
 [SupportedOSPlatform("windows")]
 public sealed partial class WindowsCredentialStore : ICredentialStore
 {
-    public const string TargetPrefix = "ForgeForWindows:";
+    /// <summary><c>ForgeForWindows:</c>, or <c>ForgeForWindows-dev:</c> in a development profile, so its tokens are its own.</summary>
+    public static string TargetPrefix => Setup.AppProfile.CredentialPrefix;
     public const int MaxBlobBytes = 2560;
     private const int MaxParts = 32;
     private const string CommentPrefix = "Laravel Forge API token (Forge for Windows)";

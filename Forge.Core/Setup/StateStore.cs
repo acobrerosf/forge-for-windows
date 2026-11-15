@@ -7,11 +7,9 @@ public sealed class StateStore
 
     public StateStore(string? path = null)
     {
-        // FORGE_STATE_DIR points a development build at a throwaway state file.
-        var dir = Environment.GetEnvironmentVariable("FORGE_STATE_DIR") is { Length: > 0 } custom
-            ? custom
-            : System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ForgeForWindows");
-        Path = path ?? System.IO.Path.Combine(dir, "state.json");
+        // The profile picks the folder (ForgeForWindows, or ForgeForWindows-dev for a development build);
+        // FORGE_STATE_DIR still points a run at a throwaway state file.
+        Path = path ?? System.IO.Path.Combine(AppProfile.DataDirectory, "state.json");
     }
 
     public SetupState Load()

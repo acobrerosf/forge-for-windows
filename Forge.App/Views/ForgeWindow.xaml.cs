@@ -60,6 +60,7 @@ public sealed partial class ForgeWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TitleBarArea);
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
+        Title = AppTitle.Text = "Forge for Windows" + Forge.Core.Setup.AppProfile.Label;
         SystemBackdrop = new MicaBackdrop();
         var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "forge.ico");
         if (File.Exists(icon))

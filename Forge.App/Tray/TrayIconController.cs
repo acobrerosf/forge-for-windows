@@ -79,7 +79,7 @@ internal sealed class TrayIconController : IDisposable
         var notifying = _notifying();
         if (_notifyItem.IsChecked != notifying) _notifyItem.IsChecked = notifying;
         var badge = snapshot.NeedsSetup ? Badge.Warn : Status.BadgeFor(snapshot.Health);
-        var tip = snapshot.Summary;
+        var tip = Forge.Core.Setup.AppProfile.IsDefault ? snapshot.Summary : $"[{Forge.Core.Setup.AppProfile.Name}] {snapshot.Summary}";
         // The shell truncates tray tooltips at 127 characters.
         tip = tip.Length > 120 ? tip[..119] + "…" : tip;
         if (_icon.ToolTipText != tip) _icon.ToolTipText = tip;

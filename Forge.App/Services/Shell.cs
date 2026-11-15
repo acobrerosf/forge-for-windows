@@ -86,8 +86,7 @@ internal static class Log
 {
     private static readonly object Gate = new();
 
-    public static string Path { get; } = System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ForgeForWindows", "app.log");
+    public static string Path { get; } = System.IO.Path.Combine(Forge.Core.Setup.AppProfile.DataDirectory, "app.log");
 
     public static void Write(string message)
     {

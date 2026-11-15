@@ -125,24 +125,53 @@ dotnet publish Forge.App -c Release -r win-x64 -p:Platform=x64 -o publish/win-x6
 The publish output is self-contained and unpackaged, so it runs without installing .NET or the Windows App SDK.
 It is about 230 MB, because it carries both runtimes.
 
+### Testing without touching your install
+
+**Debug builds use a separate `dev` profile.** A build from `dotnet build` (or Visual Studio's
+Debug) keeps its settings and log in `%LOCALAPPDATA%\ForgeForWindows-dev`, and its tokens in
+Credential Manager as `ForgeForWindows-dev:<account>`. It runs beside the installed app instead of
+handing its launch over, never writes the "Start with Windows" entry, and says "(dev)" in its titles
+and tray tooltip. Add a token to it once. `FORGE_PROFILE` picks another profile, or `default` to run a
+debug build against your real one.
+
+**Windows Sandbox tries the installer on a clean Windows** that is wiped when you close it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\sandbox.ps1 -Build
+```
+
+`-Build` publishes and compiles a fresh installer first, and without it the newest `dist\*-x64-setup.exe`
+is used. `-Portable` runs `publish\win-x64` without installing, and `-FromGitHub` installs the latest
+published release, exactly what a new user gets. Windows 11 Pro and Enterprise include Sandbox but
+leave it off: turn it on in *Turn Windows features on or off* > *Windows Sandbox*.
+
+**Use a token without write scopes for testing**, in the dev profile and in Sandbox alike. Isolation
+keeps your machine clean, but it still talks to your real Forge account, so a read-only token is
+what makes a stray click unable to deploy or restart anything.
+
+| Variable | Effect |
+|---|---|
+| `FORGE_PROFILE` | which profile a run uses: `dev` by default in debug builds, `default` (the real one) in release builds |
+| `FORGE_API` | API base URL (default `https://forge.laravel.com/api`), e.g. a local mock |
+| `FORGE_STATE_DIR` | folder for `state.json`, so a test run leaves your real state alone |
+| `FORGE_SNAPSHOT_DIR` | the flyout writes `panel.png` of its own XAML after each render. Screen capture shows WinUI windows as black. |
+| `FORGE_TEST_TOAST` | debug builds: `done` or `failed` shows a sample deployment toast for the first listed site |
+| `FORGE_TEST_TOAST_ACTION` | debug builds: plays one of that toast's buttons (`open`, `log`, `forge`), since Windows ignores scripted clicks on toasts |
+
 ### Layout
 
 - `Forge.Core/` has no UI.
   - `Model/` holds pure shaping of Forge's JSON:API answers, status precedence, the action tables, paths and text guards.
   - `Api/` holds the HTTP client and the rate budget.
   - `Service/ForgeService` is the poller, notifications, reads, writes and the command/recipe run watch.
+  - `Setup/` holds the saved state and `AppProfile`, which keeps a dev profile's data apart.
 - `Forge.Core.Tests/` has xUnit tests: model rules, plus the service against a fake client.
-- `Forge.App/` is the WinUI 3 shell: the tray icon (H.NotifyIcon), the panel, settings and toasts.
-- `tools/make-icon.ps1` regenerates `Forge.App/Assets/forge.ico`.
+- `Forge.App/` is the WinUI 3 shell: the tray icon (H.NotifyIcon), the flyout, the expanded window,
+  settings and toasts.
+- `tools/install.ps1` and `uninstall.ps1` install from source; `installer.iss` is the Inno Setup installer
+  the release workflow builds; `sandbox.ps1` tries a build in Windows Sandbox; `make-icon.ps1`
+  regenerates `Forge.App/Assets/forge.ico`.
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-### Development switches
-
-| Variable | Effect |
-|---|---|
-| `FORGE_API` | API base URL (default `https://forge.laravel.com/api`), e.g. a local mock |
-| `FORGE_STATE_DIR` | folder for `state.json`, so a test run leaves your real state alone |
-| `FORGE_SNAPSHOT_DIR` | the panel writes `panel.png` of its own XAML after each render. Screen capture shows WinUI windows as black. |

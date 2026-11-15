@@ -1,3 +1,4 @@
+using Forge.Core.Setup;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.AppLifecycle;
@@ -11,11 +12,15 @@ namespace Forge.App;
 /// </summary>
 public static class Program
 {
-    public const string InstanceKey = "ForgeForWindows.main";
-
     [STAThread]
     private static int Main(string[] args)
     {
+        // A development build keeps to its own data, tokens and instance; see AppProfile.
+#if DEBUG
+        AppProfile.Choose("dev");
+#else
+        AppProfile.Choose("");
+#endif
         WinRT.ComWrappersSupport.InitializeComWrappers();
         if (RedirectedToRunningInstance()) return 0;
 
@@ -30,7 +35,7 @@ public static class Program
 
     private static bool RedirectedToRunningInstance()
     {
-        var main = AppInstance.FindOrRegisterForKey(InstanceKey);
+        var main = AppInstance.FindOrRegisterForKey(AppProfile.InstanceKey);
         if (main.IsCurrent) return false;
 
         var activation = AppInstance.GetCurrent().GetActivatedEventArgs();
