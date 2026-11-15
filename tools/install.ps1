@@ -23,7 +23,7 @@ $dest = Join-Path $env:LOCALAPPDATA 'Programs\ForgeForWindows'
 $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Forge for Windows.lnk'
 
 if ($Build) {
-    Write-Host 'Publishing a Release build…'
+    Write-Host 'Publishing a Release build...'
     dotnet publish (Join-Path $root 'Forge.App') -c Release -r win-x64 -p:Platform=x64 -o $Source -nologo -v q
     if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
 }
