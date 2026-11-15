@@ -388,3 +388,42 @@ public class CredentialTests
         Assert.Equal("abc123", Forge.Core.Secrets.WindowsCredentialStore.DecodeBlob(System.Text.Encoding.Unicode.GetBytes("abc123")));
     }
 }
+
+public class WindowsCredentialStoreTests
+{
+    [Fact]
+    public void Long_tokens_round_trip_across_parts_and_leave_nothing_behind()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var store = new Forge.Core.Secrets.WindowsCredentialStore();
+        var account = "test-" + Guid.NewGuid().ToString("N")[..8];
+        try
+        {
+            // Over the 2,560-byte limit of one credential, the way a many-scoped Forge JWT is.
+            var longToken = string.Concat(Enumerable.Range(0, 700).Select(i => (char)('a' + i % 26))) + new string('x', 5000);
+            store.Write(account, longToken);
+            Assert.Equal(longToken, store.Read(account));
+
+            // A shorter token over it must not pick up the old parts.
+            store.Write(account, "short-token");
+            Assert.Equal("short-token", store.Read(account));
+
+            store.Write(account, longToken);
+            store.Delete(account);
+            Assert.Null(store.Read(account));
+            Assert.Null(new Forge.Core.Secrets.WindowsCredentialStore().Read(account + "#1"));
+        }
+        finally
+        {
+            store.Delete(account);
+        }
+    }
+
+    [Theory]
+    [InlineData("Laravel Forge API token (Forge for Windows), part 1 of 3", 3)]
+    [InlineData("Laravel Forge API token (Forge for Windows)", 1)]
+    [InlineData(null, 1)]
+    [InlineData("part 1 of 999", 1)]
+    public void Part_count_is_read_from_the_first_comment(string? comment, int expected) =>
+        Assert.Equal(expected, Forge.Core.Secrets.WindowsCredentialStore.PartsFromComment(comment));
+}

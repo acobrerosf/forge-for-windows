@@ -15,11 +15,21 @@ public interface ICredentialStore
 /// <summary>
 /// Tokens live in Windows Credential Manager (Generic credentials, target
 /// <c>ForgeForWindows:&lt;account&gt;</c>), never in the state file.
+///
+/// One credential holds at most 2,560 bytes (CRED_MAX_CREDENTIAL_BLOB_SIZE)
+/// and CredWrite refuses more with RPC_X_BAD_STUB_DATA, while a Forge token is
+/// a JWT that grows with its scopes and can be longer. So a long token is split
+/// across <c>…:&lt;account&gt;</c>, <c>…:&lt;account&gt;#1</c>, <c>#2</c>…, and the
+/// first part's comment says how many parts there are — read back from there,
+/// so a shorter token written later never picks up a stale tail.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed partial class WindowsCredentialStore : ICredentialStore
 {
     public const string TargetPrefix = "ForgeForWindows:";
+    public const int MaxBlobBytes = 2560;
+    private const int MaxParts = 32;
+    private const string CommentPrefix = "Laravel Forge API token (Forge for Windows)";
 
     private const int CredTypeGeneric = 1;
     private const int CredPersistLocalMachine = 2;
@@ -27,9 +37,35 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
 
     public static string Target(string account) => TargetPrefix + account;
 
+    internal static string PartTarget(string account, int part) => part == 0 ? Target(account) : $"{Target(account)}#{part}";
+
+    /// <summary>The part count recorded on the first credential; one when it records none (e.g. written by cmdkey).</summary>
+    internal static int PartsFromComment(string? comment)
+    {
+        var marker = comment?.LastIndexOf(" of ", StringComparison.Ordinal) ?? -1;
+        if (marker < 0) return 1;
+        var digits = new string(comment![(marker + 4)..].TakeWhile(char.IsAsciiDigit).ToArray());
+        return int.TryParse(digits, out var n) && n is >= 1 and <= MaxParts ? n : 1;
+    }
+
     public string? Read(string account)
     {
-        if (!CredRead(Target(account), CredTypeGeneric, 0, out var ptr))
+        var first = ReadBlob(PartTarget(account, 0));
+        if (first is null) return null;
+        var parts = PartsFromComment(first.Value.Comment);
+        var bytes = new List<byte>(first.Value.Bytes);
+        for (var i = 1; i < parts; i++)
+        {
+            // A missing part means the set is broken; a truncated token would only be rejected later.
+            if (ReadBlob(PartTarget(account, i)) is not { } part) return null;
+            bytes.AddRange(part.Bytes);
+        }
+        return bytes.Count == 0 ? null : DecodeBlob(bytes.ToArray());
+    }
+
+    private static (byte[] Bytes, string? Comment)? ReadBlob(string target)
+    {
+        if (!CredRead(target, CredTypeGeneric, 0, out var ptr))
         {
             var error = Marshal.GetLastPInvokeError();
             if (error == ErrorNotFound) return null;
@@ -38,10 +74,10 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
         try
         {
             var cred = Marshal.PtrToStructure<Credential>(ptr);
-            if (cred.CredentialBlobSize == 0 || cred.CredentialBlob == IntPtr.Zero) return null;
             var bytes = new byte[cred.CredentialBlobSize];
-            Marshal.Copy(cred.CredentialBlob, bytes, 0, bytes.Length);
-            return DecodeBlob(bytes);
+            if (bytes.Length > 0 && cred.CredentialBlob != IntPtr.Zero)
+                Marshal.Copy(cred.CredentialBlob, bytes, 0, bytes.Length);
+            return (bytes, cred.Comment);
         }
         finally
         {
@@ -63,15 +99,33 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
     public void Write(string account, string token)
     {
         var bytes = Encoding.UTF8.GetBytes(token);
-        var blob = Marshal.AllocHGlobal(bytes.Length);
+        var parts = Math.Max(1, (bytes.Length + MaxBlobBytes - 1) / MaxBlobBytes);
+        if (parts > MaxParts) throw new InvalidOperationException("That token is too long to store.");
+
+        // Later parts first, so the first part — which names the count — is never ahead of them.
+        for (var i = parts - 1; i >= 0; i--)
+        {
+            var offset = i * MaxBlobBytes;
+            var length = Math.Min(MaxBlobBytes, bytes.Length - offset);
+            WriteBlob(PartTarget(account, i), account, bytes.AsSpan(offset, Math.Max(0, length)),
+                parts == 1 ? CommentPrefix : $"{CommentPrefix}, part {i + 1} of {parts}");
+        }
+        // Parts a longer earlier token left behind.
+        for (var i = parts; i < MaxParts; i++)
+            if (!DeleteTarget(PartTarget(account, i))) break;
+    }
+
+    private static void WriteBlob(string target, string account, ReadOnlySpan<byte> bytes, string comment)
+    {
+        var blob = Marshal.AllocHGlobal(Math.Max(1, bytes.Length));
         try
         {
-            Marshal.Copy(bytes, 0, blob, bytes.Length);
+            Marshal.Copy(bytes.ToArray(), 0, blob, bytes.Length);
             var cred = new Credential
             {
                 Type = CredTypeGeneric,
-                TargetName = Target(account),
-                Comment = "Laravel Forge API token (Forge for Windows)",
+                TargetName = target,
+                Comment = comment,
                 CredentialBlobSize = bytes.Length,
                 CredentialBlob = blob,
                 Persist = CredPersistLocalMachine,
@@ -87,11 +141,18 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
 
     public void Delete(string account)
     {
-        if (!CredDelete(Target(account), CredTypeGeneric, 0))
-        {
-            var error = Marshal.GetLastPInvokeError();
-            if (error != ErrorNotFound) throw new Win32Exception(error);
-        }
+        DeleteTarget(PartTarget(account, 0));
+        for (var i = 1; i < MaxParts; i++)
+            if (!DeleteTarget(PartTarget(account, i))) break;
+    }
+
+    /// <summary>False when there was nothing to delete.</summary>
+    private static bool DeleteTarget(string target)
+    {
+        if (CredDelete(target, CredTypeGeneric, 0)) return true;
+        var error = Marshal.GetLastPInvokeError();
+        if (error == ErrorNotFound) return false;
+        throw new Win32Exception(error);
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
