@@ -84,6 +84,10 @@ It is about 230 MB, because it carries both runtimes.
 - `Forge.App/` is the WinUI 3 shell: the tray icon (H.NotifyIcon), the panel, settings and toasts.
 - `tools/make-icon.ps1` regenerates `Forge.App/Assets/forge.ico`.
 
+## License
+
+MIT — see [LICENSE](LICENSE).
+
 ### Development switches
 
 | Variable | Effect |
