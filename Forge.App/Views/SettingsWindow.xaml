@@ -6,63 +6,237 @@
     Title="Forge for Windows — Settings">
 
     <Grid>
+        <Grid.Resources>
+            <Style x:Key="SettingsCard" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Padding" Value="16,12" />
+                <Setter Property="MinHeight" Value="68" />
+            </Style>
+            <Style x:Key="CardCaption" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+            <Style x:Key="PageTitle" TargetType="TextBlock" BasedOn="{StaticResource TitleTextBlockStyle}">
+                <Setter Property="Margin" Value="0,0,0,16" />
+            </Style>
+        </Grid.Resources>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <Grid x:Name="TitleBarArea" Height="40" Padding="16,0,0,0">
-            <TextBlock Text="Forge for Windows — Settings" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
+
+        <Grid x:Name="TitleBarArea" Height="48" Padding="16,0,0,0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Image x:Name="TitleIcon" Width="16" Height="16" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="Forge for Windows · Settings" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
         </Grid>
 
-        <ScrollViewer Grid.Row="1">
-            <StackPanel Padding="28,8,28,32" Spacing="14" MaxWidth="680" HorizontalAlignment="Stretch">
-
-                <TextBlock Text="Accounts" Style="{StaticResource SubtitleTextBlockStyle}" />
-                <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           Text="One Forge API token per Forge account. Tokens are kept in Windows Credential Manager and never written to disk by this app." />
-                <StackPanel x:Name="AccountsPanel" Spacing="8" />
-
-                <Border Padding="16" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="Add or update a token" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                        <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   Text="Read access to servers and sites is enough to watch them. Each write scope is opt-in: site:manage-deploys to deploy and read deploy logs, server:manage-services to restart services and reboot, site:manage-commands for maintenance mode and commands, server:manage-logs for site logs, recipe:view / recipe:manage for recipes." />
-                        <HyperlinkButton x:Name="TokenLink" Content="Create a token at forge.laravel.com/profile/api" Padding="0" Click="TokenLink_Click" />
-                        <TextBox x:Name="AccountNameBox" Header="Account name (optional)" PlaceholderText="work" />
-                        <PasswordBox x:Name="TokenBox" Header="API token" />
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <Button x:Name="VerifyButton" Content="Check token" Click="VerifyButton_Click" />
-                            <ProgressRing x:Name="VerifyRing" IsActive="False" Width="20" Height="20" />
-                        </StackPanel>
-                        <InfoBar x:Name="VerifyInfo" IsOpen="False" IsClosable="False" />
-                        <StackPanel x:Name="OrgPicker" Visibility="Collapsed" Spacing="6">
-                            <TextBlock Text="Organizations to watch" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                            <StackPanel x:Name="OrgChecks" />
-                            <Button x:Name="SaveAccountButton" Content="Save account" Style="{StaticResource AccentButtonStyle}" Click="SaveAccountButton_Click" />
-                        </StackPanel>
+        <NavigationView Grid.Row="1" x:Name="Nav" PaneDisplayMode="Left" IsSettingsVisible="False" IsBackButtonVisible="Collapsed"
+                        IsPaneToggleButtonVisible="False" OpenPaneLength="260" SelectionChanged="Nav_SelectionChanged">
+            <NavigationView.PaneHeader>
+                <Grid Padding="12,4,12,12" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Image x:Name="PaneIcon" Width="40" Height="40" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Forge for Windows" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock x:Name="PaneSummary" Style="{StaticResource CardCaption}" />
                     </StackPanel>
-                </Border>
+                </Grid>
+            </NavigationView.PaneHeader>
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="Accounts" Tag="accounts" x:Name="AccountsItem">
+                    <NavigationViewItem.Icon><FontIcon Glyph="&#xE77B;" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="General" Tag="general">
+                    <NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="Notifications" Tag="notifications">
+                    <NavigationViewItem.Icon><FontIcon Glyph="&#xEA8F;" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="About" Tag="about">
+                    <NavigationViewItem.Icon><FontIcon Glyph="&#xE946;" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
 
-                <TextBlock Text="General" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,12,0,0" />
-                <NumberBox x:Name="IntervalBox" Header="Refresh interval (seconds)" Minimum="30" Maximum="3600"
-                           SmallChange="10" LargeChange="60" SpinButtonPlacementMode="Inline" HorizontalAlignment="Left" Width="240" />
-                <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           Text="Each refresh costs two requests per organization against Forge's 60 per minute, shared with your browser. While a deploy runs, the app looks every 15 seconds." />
-                <ToggleSwitch x:Name="NotifySwitch" Header="Notify when a deployment finishes or fails" />
-                <ToggleSwitch x:Name="StartupSwitch" Header="Start with Windows (in the tray, without opening the panel)" />
-                <TextBox x:Name="TemplateBox" Header="Dashboard address template" FontFamily="{StaticResource MonoFont}" />
-                <TextBlock x:Name="TemplateHelp" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <Button x:Name="SaveSettingsButton" Content="Save settings" Style="{StaticResource AccentButtonStyle}" Click="SaveSettingsButton_Click" />
-                    <TextBlock x:Name="SettingsSaved" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                </StackPanel>
+            <ScrollViewer>
+                <Grid Padding="40,8,40,32" MaxWidth="1000" HorizontalAlignment="Stretch">
 
-                <TextBlock Text="Files" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,12,0,0" />
-                <TextBlock x:Name="PathsText" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontFamily="{StaticResource MonoFont}" FontSize="12" />
-                <Button Content="Open the folder" Click="OpenFolder_Click" />
-            </StackPanel>
-        </ScrollViewer>
+                    <!-- Accounts -->
+                    <StackPanel x:Name="AccountsPage" Spacing="4">
+                        <TextBlock Text="Accounts" Style="{StaticResource PageTitle}" />
+                        <StackPanel x:Name="AccountsPanel" Spacing="4" />
+
+                        <Expander x:Name="AddExpander" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,4,0,0">
+                            <Expander.Header>
+                                <Grid ColumnSpacing="16" Padding="0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="32" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon Glyph="&#xE710;" FontSize="16" />
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock x:Name="AddTitle" Text="Add a Forge account" />
+                                        <TextBlock Style="{StaticResource CardCaption}"
+                                                   Text="Paste an API token. It goes to Windows Credential Manager, never to a file." />
+                                    </StackPanel>
+                                </Grid>
+                            </Expander.Header>
+                            <StackPanel Spacing="12" Padding="48,4,0,8" MaxWidth="640" HorizontalAlignment="Left">
+                                <TextBlock Style="{StaticResource CardCaption}"
+                                           Text="Read access to servers and sites is enough to watch them. Each write needs its own scope: site:manage-deploys to deploy and read deploy logs, server:manage-services to restart services and reboot, site:manage-commands for maintenance mode and commands, server:manage-logs for site logs, recipe:view and recipe:manage for recipes." />
+                                <HyperlinkButton x:Name="TokenLink" Content="Create a token at forge.laravel.com/profile/api" Padding="0" Click="TokenLink_Click" />
+                                <TextBox x:Name="AccountNameBox" Header="Account name (optional)" PlaceholderText="work" MaxWidth="360" HorizontalAlignment="Left" Width="360" />
+                                <PasswordBox x:Name="TokenBox" Header="API token" />
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <Button x:Name="VerifyButton" Content="Check token" Click="VerifyButton_Click" />
+                                    <ProgressRing x:Name="VerifyRing" IsActive="False" Width="20" Height="20" />
+                                </StackPanel>
+                                <InfoBar x:Name="VerifyInfo" IsOpen="False" IsClosable="False" />
+                                <StackPanel x:Name="OrgPicker" Visibility="Collapsed" Spacing="6">
+                                    <TextBlock Text="Organizations to watch" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <StackPanel x:Name="OrgChecks" />
+                                    <Button x:Name="SaveAccountButton" Content="Save account" Style="{StaticResource AccentButtonStyle}"
+                                            Click="SaveAccountButton_Click" Margin="0,6,0,0" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Expander>
+                    </StackPanel>
+
+                    <!-- General -->
+                    <StackPanel x:Name="GeneralPage" Spacing="4" Visibility="Collapsed">
+                        <TextBlock Text="General" Style="{StaticResource PageTitle}" />
+                        <Border Style="{StaticResource SettingsCard}">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="32" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Glyph="&#xE72C;" FontSize="16" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="Check for changes every" />
+                                    <TextBlock Style="{StaticResource CardCaption}"
+                                               Text="In seconds. Each check costs two requests per organization; Forge allows 60 a minute, shared with your browser, and the app keeps to 40. While a deploy runs it checks every 15 seconds." />
+                                </StackPanel>
+                                <NumberBox Grid.Column="2" x:Name="IntervalBox" Minimum="30" Maximum="3600" SmallChange="10" LargeChange="60"
+                                           SpinButtonPlacementMode="Inline" Width="150" VerticalAlignment="Center"
+                                           ValueChanged="IntervalBox_ValueChanged" AutomationProperties.Name="Seconds between checks" />
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource SettingsCard}">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="32" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Glyph="&#xE7E8;" FontSize="16" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="Start with Windows" />
+                                    <TextBlock Style="{StaticResource CardCaption}" Text="Starts in the tray, without opening the flyout" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="2" x:Name="StartupSwitch" MinWidth="0" VerticalAlignment="Center"
+                                              Toggled="Setting_Changed" AutomationProperties.Name="Start with Windows" />
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource SettingsCard}">
+                            <Grid ColumnSpacing="16" RowSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="32" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <FontIcon Glyph="&#xE71B;" FontSize="16" VerticalAlignment="Top" Margin="0,2,0,0" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="Dashboard address" />
+                                    <TextBlock x:Name="TemplateHelp" Style="{StaticResource CardCaption}" />
+                                </StackPanel>
+                                <TextBox Grid.Row="1" Grid.Column="1" x:Name="TemplateBox" FontFamily="{StaticResource MonoFont}"
+                                         LostFocus="TemplateBox_LostFocus" KeyDown="TemplateBox_KeyDown"
+                                         AutomationProperties.Name="Dashboard address template" />
+                            </Grid>
+                        </Border>
+                        <TextBlock Style="{StaticResource CardCaption}" Margin="2,8,0,0" Text="Changes apply as you make them." />
+                    </StackPanel>
+
+                    <!-- Notifications -->
+                    <StackPanel x:Name="NotificationsPage" Spacing="4" Visibility="Collapsed">
+                        <TextBlock Text="Notifications" Style="{StaticResource PageTitle}" />
+                        <Border Style="{StaticResource SettingsCard}">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="32" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Glyph="&#xE898;" FontSize="16" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="A deployment finishes or fails" />
+                                    <TextBlock Style="{StaticResource CardCaption}" Text="A toast for each one; clicking it opens the site" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="2" x:Name="NotifySwitch" MinWidth="0" VerticalAlignment="Center"
+                                              Toggled="Setting_Changed" AutomationProperties.Name="Notify when a deployment finishes or fails" />
+                            </Grid>
+                        </Border>
+                        <TextBlock Style="{StaticResource CardCaption}" Margin="2,8,0,0"
+                                   Text="Windows can also silence the app, or change how its toasts look, in Settings › System › Notifications." />
+                    </StackPanel>
+
+                    <!-- About -->
+                    <StackPanel x:Name="AboutPage" Spacing="4" Visibility="Collapsed">
+                        <TextBlock Text="About" Style="{StaticResource PageTitle}" />
+                        <Border Style="{StaticResource SettingsCard}">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="32" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Image x:Name="AboutIcon" Width="24" Height="24" VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="Forge for Windows" />
+                                    <TextBlock x:Name="VersionText" Style="{StaticResource CardCaption}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource SettingsCard}">
+                            <Grid ColumnSpacing="16" RowSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="32" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <FontIcon Glyph="&#xE8B7;" FontSize="16" VerticalAlignment="Top" Margin="0,2,0,0" />
+                                <TextBlock Grid.Column="1" Text="Where things are kept" />
+                                <Grid Grid.Row="1" Grid.Column="1" x:Name="PathsGrid" ColumnSpacing="16" RowSpacing="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                </Grid>
+                                <Button Grid.Row="2" Grid.Column="1" Content="Open the folder" Click="OpenFolder_Click" Margin="0,4,0,0" />
+                            </Grid>
+                        </Border>
+                        <TextBlock Style="{StaticResource CardCaption}" Margin="2,8,0,0"
+                                   Text="A port of omarchy-forge, the Omarchy bar widget. MIT licence." />
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
+        </NavigationView>
     </Grid>
 </Window>
