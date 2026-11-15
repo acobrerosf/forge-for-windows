@@ -77,7 +77,21 @@ public sealed partial class SettingsWindow : Window
         Activate();
     }
 
-    public void OnServiceChanged() => RenderAccounts();
+    public void OnServiceChanged()
+    {
+        RenderAccounts();
+        // The tray menu can flip notifications; follow it. Text fields are left alone so a refresh never eats typing.
+        _loading = true;
+        try
+        {
+            NotifySwitch.IsOn = _service.Setup.Settings.NotifyDeployments;
+            StartupSwitch.IsOn = _service.Setup.Settings.StartWithWindows;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
 
     // ------------------------------------------------------------ sections
 

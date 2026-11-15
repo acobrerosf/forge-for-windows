@@ -16,17 +16,42 @@ internal sealed class TrayIconController : IDisposable
 {
     private readonly TaskbarIcon _icon;
     private readonly DispatcherQueueTimer _pulse;
+    private readonly ToggleMenuFlyoutItem _notifyItem;
+    private readonly Func<bool> _notifying;
     private Badge _badge = Badge.Warn;
     private bool _lit = true;
 
-    public TrayIconController(Action toggle, Action settings, Action refresh, Action quit)
+    /// <param name="notifying">Whether deployment toasts are on.</param>
+    /// <param name="setNotifying">Turns them on or off, as the Notifications switch in Settings does.</param>
+    public TrayIconController(Action toggle, Action settings, Action refresh, Action quit,
+        Func<bool> notifying, Action<bool> setNotifying)
     {
+        _notifying = notifying;
+        // The Windows tray convention: the default action first and in bold, then quick switches, then Quit last.
         var menu = new MenuFlyout();
-        menu.Items.Add(new MenuFlyoutItem { Text = "Open Forge", Command = new RelayCommand(toggle) });
+        menu.Items.Add(new MenuFlyoutItem
+        {
+            Text = "Open Forge",
+            FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+            Command = new RelayCommand(toggle),
+        });
         menu.Items.Add(new MenuFlyoutItem { Text = "Refresh now", Command = new RelayCommand(refresh) });
-        menu.Items.Add(new MenuFlyoutItem { Text = "Settings…", Command = new RelayCommand(settings) });
         menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(new MenuFlyoutItem { Text = "Quit", Command = new RelayCommand(quit) });
+        _notifyItem = new ToggleMenuFlyoutItem
+        {
+            Text = "Deployment notifications",
+            IsChecked = notifying(),
+            // Mute and unmute without opening Settings.
+            Command = new RelayCommand(() =>
+            {
+                setNotifying(!_notifying());
+                _notifyItem!.IsChecked = _notifying();
+            }),
+        };
+        menu.Items.Add(_notifyItem);
+        menu.Items.Add(new MenuFlyoutItem { Text = "Settings", Command = new RelayCommand(settings) });
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(new MenuFlyoutItem { Text = "Quit Forge", Command = new RelayCommand(quit) });
 
         _icon = new TaskbarIcon
         {
@@ -51,6 +76,8 @@ internal sealed class TrayIconController : IDisposable
 
     public void Update(ForgeSnapshot snapshot)
     {
+        // Settings can change the same switch; keep the menu's tick in step with it.
+        _notifyItem.IsChecked = _notifying();
         var badge = snapshot.NeedsSetup ? Badge.Warn : Status.BadgeFor(snapshot.Health);
         var tip = snapshot.Summary;
         // The shell truncates tray tooltips at 127 characters.

@@ -170,6 +170,22 @@ public sealed partial class PanelWindow : Window
         DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, FocusContent);
     }
 
+    /// <summary>From a toast's View log: the flyout opened on that site's deployment log, Back leading to the site.</summary>
+    public void ShowDeploymentLog(string org, string siteKey)
+    {
+        Disarm();
+        while (_nav.Count > 1) Pop();
+        if (!_visible) ShowPanel();
+        if (_service.Snapshot.Org(org)?.SiteByKey(siteKey) is not { } site)
+        {
+            Flash("That site is no longer listed");
+            return;
+        }
+        SelectRow(SiteRowKey(org, site.Key));
+        Push(new NavSite { Org = org, SiteKey = site.Key });
+        OpenDeployLog();
+    }
+
     public void HidePanel()
     {
         if (!_visible) return;
