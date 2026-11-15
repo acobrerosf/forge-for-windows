@@ -6,15 +6,20 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
 - **Tray icon** with one badge for the worst state across every watched organization:
   none, hollow (maintenance), pulsing (deploy running), amber (token or request problem),
   red (server unreachable or deploy failed). The tooltip summarises it.
-- **Panel** (left-click the tray icon): servers and their sites, keyboard first.
+- **Flyout** (left-click the tray icon): servers and their sites, with search, organization tabs and
+  chips for anything failed, deploying or in maintenance. Hover a row for Deploy and Open site, or
+  right-click it for everything else. Works fully from the keyboard too.
   - Site actions: deploy, maintenance mode, PHP-FPM reload, run a command, deployment log,
     application and nginx logs, heartbeats, open site, open in Forge, copy ssh, open ssh in Windows Terminal.
   - Server actions: restart nginx, PHP-FPM, supervisor, redis and the database (only the services the
     server type runs), reboot, events, recipes, monitors.
-- **Toasts** when a deployment finishes or fails. Clicking one opens the site.
-- **Every write arms first** and is sent only by a capital **Y**. Any other key, or 8 seconds passing, cancels it.
+- **Window** (the flyout's ⧉ button, Ctrl+O, or the tray menu): the same servers and sites with room to read.
+  A site's logs open in tabs with find, wrap, copy and save; a server's events sit beside their output.
+- **Toasts** when a deployment finishes or fails, with Open site, View log and Open in Forge buttons.
+- **Every write asks first** in a small dialog. Cancel has the focus, so Enter and Esc both drop it;
+  only the dialog's own button, or a capital **Y**, sends it.
 
-## Keys
+## Keys (flyout)
 
 | Key | Does |
 |---|---|
@@ -23,15 +28,28 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
 | `→` / `l` | drill in (a server's actions) |
 | `←` / `h` / `Backspace` | back |
 | `Esc` | back, then close |
-| `d` | arm a deploy of the current site |
-| `Y` | send what is armed |
+| `Ctrl+F` | search |
+| `Ctrl+O` | open in a window |
+| `d` | deploy the current site (asks first) |
+| `m` | maintenance mode, on a site's page (asks first) |
+| `Y` | confirm what a dialog asks |
 | `o` / `f` / `s` / `t` | open site / open in Forge / copy ssh / ssh in Windows Terminal |
 | `e` | server events |
 | `r` | refresh (or reload the open log) |
 | `c` / `w` | in a log: copy / save to Downloads |
 | `,` | settings |
+| `?` | these keys |
 
 ## Install
+
+Download the latest **setup.exe** from [Releases](https://github.com/acobrerosf/forge-for-windows/releases)
+(`x64` for most PCs, `arm64` for Windows on ARM) and run it. It installs for you only, with no admin
+rights, and adds Forge for Windows to the Start menu and to Settings › Apps for uninstalling. To
+update, run a newer setup; your accounts and tokens are kept. The installer isn't code-signed, so
+Windows may say it's from an unknown publisher: choose **More info › Run anyway**. Each release also
+has a portable zip that runs without installing.
+
+### From source
 
 You need the [.NET 10 SDK](https://dotnet.microsoft.com/download) to build. It isn't needed to run the installed app.
 
@@ -49,6 +67,20 @@ The script installs for the current user only, with no admin rights:
 
 To update, run `git pull` and then run the same install command again; your accounts and tokens are kept.
 To remove the app, run `tools\uninstall.ps1`. Add `-Purge` to also delete your settings and stored tokens.
+The script and the setup install to the same place, so either one updates an install made by the other.
+
+### Making a release
+
+Push a version tag and GitHub Actions builds the x64 and ARM64 installers and portable zips
+(`.github/workflows/release.yml`, using `tools/installer.iss`) and attaches them to a draft release:
+
+```powershell
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Then read the draft on the Releases page and press **Publish release**. Running the workflow by hand
+from the Actions tab builds the same files as a downloadable artifact, without making a release.
 
 ## Setup
 
