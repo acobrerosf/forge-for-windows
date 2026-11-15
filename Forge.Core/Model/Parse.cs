@@ -1,0 +1,261 @@
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+
+namespace Forge.Core.Model;
+
+/// <summary>JSON:API → flat records. Port of the <c>*From</c> functions in omarchy-forge's Model.js.</summary>
+public static partial class Parse
+{
+    // ------------------------------------------------------------- servers
+
+    /// <summary>
+    /// Readiness is spread across three fields that can disagree. Known
+    /// connection failures are matched rather than known successes, so a value
+    /// nobody has seen yet reads as healthy instead of lighting up the tray.
+    /// </summary>
+    public static ServerState ServerStateOf(JsonNode? attributes)
+    {
+        if (attributes is null) return ServerState.Unknown;
+        if (Json.IsTrue(Json.Get(attributes, "revoked"))) return ServerState.Revoked;
+        if (!Json.IsTrue(Json.Get(attributes, "is_ready"))) return ServerState.Provisioning;
+        var connection = Json.Str(Json.Get(attributes, "connection_status")).ToLowerInvariant();
+        if (connection == "") return ServerState.Ready;
+        if (ConnectionFailed().IsMatch(connection)) return ServerState.Unreachable;
+        if (ConnectionPending().IsMatch(connection)) return ServerState.Provisioning;
+        return ServerState.Ready;
+    }
+
+    [GeneratedRegex("fail|error|refus|timeout|timed.?out|unreachable|denied|disconnect|lost")]
+    private static partial Regex ConnectionFailed();
+
+    [GeneratedRegex("pending|connecting|checking|queued")]
+    private static partial Regex ConnectionPending();
+
+    public static List<Server> Servers(JsonNode? body)
+    {
+        var list = new List<Server>();
+        foreach (var r in Json.Items(body, "data"))
+        {
+            var a = Json.Get(r, "attributes");
+            var port = (int)Json.Num(Json.Get(a, "ssh_port"));
+            list.Add(new Server
+            {
+                Id = Json.Str(Json.Get(r, "id")),
+                Name = Json.Str(Json.Get(a, "name"), "server"),
+                Slug = Json.Str(Json.Get(a, "slug")),
+                Kind = Json.Str(Json.Get(a, "type")),
+                Provider = Json.Str(Json.Get(a, "provider")),
+                Region = Json.Str(Json.Get(a, "region")),
+                Ip = Json.Str(Json.Get(a, "ip_address")),
+                SshPort = port > 0 ? port : 22,
+                PhpVersion = Json.Str(Json.Get(a, "php_version")),
+                DatabaseType = Json.Str(Json.Get(a, "database_type")),
+                State = ServerStateOf(a),
+            });
+        }
+        return list;
+    }
+
+    // --------------------------------------------------------------- sites
+
+    private static Dictionary<string, JsonNode> IncludedIndex(JsonNode? body)
+    {
+        var index = new Dictionary<string, JsonNode>(StringComparer.Ordinal);
+        foreach (var r in Json.Items(body, "included"))
+        {
+            var type = Json.Str(Json.Get(r, "type"));
+            if (type == "") continue;
+            index[type + ":" + Json.Str(Json.Get(r, "id"))] = r;
+        }
+        return index;
+    }
+
+    private static JsonNode? Related(JsonNode resource, string name, Dictionary<string, JsonNode> index)
+    {
+        var identifier = Json.Get(resource, "relationships", name, "data");
+        var type = Json.Str(Json.Get(identifier, "type"));
+        if (type == "") return null;
+        return index.GetValueOrDefault(type + ":" + Json.Str(Json.Get(identifier, "id")));
+    }
+
+    /// <summary>
+    /// Which server a site belongs to, read off its relationship linkage. Only
+    /// <c>include=server</c> puts that linkage there at all.
+    /// </summary>
+    public static string ServerIdOf(JsonNode? resource) =>
+        Json.Str(Json.Get(resource, "relationships", "server", "data", "id"));
+
+    public static List<Site> Sites(JsonNode? body)
+    {
+        var list = new List<Site>();
+        var index = IncludedIndex(body);
+        foreach (var r in Json.Items(body, "data"))
+        {
+            var serverId = ServerIdOf(r);
+            if (serverId == "") continue;
+
+            var a = Json.Get(r, "attributes");
+            var repository = Json.Get(a, "repository");
+            var deployment = Related(r, "latestDeployment", index);
+            var d = deployment is null ? null : Json.Get(deployment, "attributes");
+            var commit = Json.Get(d, "commit");
+            var maintenance = Json.Get(a, "maintenance_mode");
+
+            // The live status beats the last record: a running deploy has not produced one yet.
+            var status = Json.Str(Json.Get(a, "deployment_status"));
+            if (status == "" && d is not null) status = Json.Str(Json.Get(d, "status"));
+
+            var hash = Json.Str(Json.Get(commit, "hash"));
+            var deployedAt = Json.Str(Json.Get(d, "ended_at"));
+            if (deployedAt == "") deployedAt = Json.Str(Json.Get(d, "started_at"));
+
+            list.Add(new Site
+            {
+                Id = Json.Str(Json.Get(r, "id")),
+                ServerId = serverId,
+                Name = Json.Str(Json.Get(a, "name"), "site"),
+                Url = Json.Str(Json.Get(a, "url")),
+                Https = Json.IsTrue(Json.Get(a, "https")),
+                SiteStatus = Json.Str(Json.Get(a, "status")),
+                DeploymentStatus = status,
+                DeploymentId = deployment is null ? "" : Json.Str(Json.Get(deployment, "id")),
+                Branch = Json.Str(Json.Get(repository, "branch")),
+                RepoUrl = Json.Str(Json.Get(repository, "url")),
+                QuickDeploy = Json.IsTrue(Json.Get(a, "quick_deploy")),
+                DeployedAt = deployedAt,
+                CommitHash = hash.Length > 7 ? hash[..7] : hash,
+                CommitMessage = Json.Str(Json.Get(commit, "message")).Split('\n')[0],
+                PhpVersion = Json.Str(Json.Get(a, "php_version")),
+                AppType = Json.Str(Json.Get(a, "app_type")),
+                Isolated = Json.IsTrue(Json.Get(a, "isolated")),
+                ZeroDowntime = Json.IsTrue(Json.Get(a, "zero_downtime_deployments")),
+                UsesEnvoyer = Json.IsTrue(Json.Get(a, "uses_envoyer")),
+                Wildcards = Json.IsTrue(Json.Get(a, "wildcards")),
+                DeploymentRetention = (int)Json.Num(Json.Get(a, "deployment_retention")),
+                HealthcheckUrl = Json.Str(Json.Get(a, "healthcheck_url")),
+                Aliases = Json.Get(a, "aliases") is JsonArray aliases
+                    ? aliases.Select(Json.Str).Where(s => s != "").ToList()
+                    : [],
+                Maintenance = Json.IsTrue(Json.Get(maintenance, "enabled")),
+                MaintenanceStatus = Json.Str(Json.Get(maintenance, "status")),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// A page whose rows all lack the server linkage is not an empty
+    /// organization: it is the API ignoring <c>include=server</c>, or a token
+    /// that can see sites but not servers. The caller reports it as an error.
+    /// </summary>
+    public static bool SitesLinkageMissing(JsonNode? body, IReadOnlyCollection<Site> sites) =>
+        Json.Items(body, "data").Any() && sites.Count == 0;
+
+    // -------------------------------------------------------------- others
+
+    public static List<ForgeEvent> Events(JsonNode? body)
+    {
+        var index = IncludedIndex(body);
+        return Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                var site = Related(r, "site", index);
+                return new ForgeEvent(
+                    Json.Str(Json.Get(r, "id")),
+                    Json.Str(Json.Get(a, "description"), "event"),
+                    Json.Str(Json.Get(a, "ran_as")),
+                    Json.Str(Json.Get(site, "attributes", "name")),
+                    Json.Str(Json.Get(a, "created_at")));
+            })
+            .OrderByDescending(e => Json.ParseIsoMs(e.CreatedAt) ?? 0)
+            .ToList();
+    }
+
+    /// <summary>The script itself is not kept — only its first line, which is what a row shows.</summary>
+    public static List<Recipe> Recipes(JsonNode? body) =>
+        Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                return new Recipe(
+                    Json.Str(Json.Get(r, "id")),
+                    Json.Str(Json.Get(a, "name"), "recipe"),
+                    Json.Str(Json.Get(a, "user")),
+                    Json.Str(Json.Get(a, "script")).Split('\n')[0].Trim(),
+                    Json.Str(Json.Get(a, "updated_at")));
+            })
+            .OrderBy(r => r.Name, ForgeText.Collation)
+            .ToList();
+
+    public static List<ServerMonitor> Monitors(JsonNode? body) =>
+        Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                return new ServerMonitor
+                {
+                    Id = Json.Str(Json.Get(r, "id")),
+                    Type = Json.Str(Json.Get(a, "type")),
+                    Operator = Json.Str(Json.Get(a, "operator")),
+                    Threshold = Json.Num(Json.Get(a, "threshold")),
+                    Minutes = (int)Json.Num(Json.Get(a, "minutes")),
+                    Notify = Json.Str(Json.Get(a, "notify")),
+                    Status = Json.Str(Json.Get(a, "status")),
+                    State = Json.Str(Json.Get(a, "state")),
+                    StateChangedAt = Json.Str(Json.Get(a, "state_changed_at")),
+                };
+            })
+            .OrderBy(Status.MonitorRank)
+            .ThenBy(Status.MonitorLabel, ForgeText.Collation)
+            .ToList();
+
+    public static List<Heartbeat> Heartbeats(JsonNode? body) =>
+        Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                return new Heartbeat
+                {
+                    Id = Json.Str(Json.Get(r, "id")),
+                    Name = Json.Str(Json.Get(a, "name"), "heartbeat"),
+                    Status = Json.Str(Json.Get(a, "status")),
+                    GracePeriod = (int)Json.Num(Json.Get(a, "grace_period")),
+                    Frequency = (int)Json.Num(Json.Get(a, "frequency")),
+                    CustomFrequency = Json.Str(Json.Get(a, "custom_frequency")),
+                };
+            })
+            .OrderBy(Status.HeartbeatRank)
+            .ThenBy(h => h.Name, ForgeText.Collation)
+            .ToList();
+
+    public static List<Organization> Organizations(JsonNode? body) =>
+        Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                var slug = Json.Str(Json.Get(a, "slug"));
+                return new Organization(slug, Json.Str(Json.Get(a, "name"), slug));
+            })
+            .Where(o => o.Slug != "")
+            .ToList();
+
+    public static ForgeUser User(JsonNode? body)
+    {
+        var a = Json.Get(body, "data", "attributes");
+        var email = Json.Str(Json.Get(a, "email"));
+        var name = Json.Str(Json.Get(a, "name"));
+        return new ForgeUser(email, name == "" ? (email == "" ? "Forge" : email) : name);
+    }
+
+    // ---------------------------------------------------------- pagination
+
+    /// <summary><c>meta.next_cursor</c> is the only reliable signal: <c>links</c> is an empty array on the last page.</summary>
+    public static string NextCursor(JsonNode? body) => Json.Str(Json.Get(body, "meta", "next_cursor"));
+
+    public static JsonNode? Attributes(JsonNode? body) => Json.Get(body, "data", "attributes");
+
+    /// <summary>A single resource's string field, or null when it is missing (a malformed answer, unlike an empty one).</summary>
+    public static string? ResourceText(JsonNode? body, string field) =>
+        Json.Get(Attributes(body), field) is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+}

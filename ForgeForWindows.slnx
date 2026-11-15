@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="Forge.App/Forge.App.csproj">
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="Forge.Core.Tests/Forge.Core.Tests.csproj" />
+  <Project Path="Forge.Core/Forge.Core.csproj" />
+</Solution>

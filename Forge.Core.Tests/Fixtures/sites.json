@@ -1,0 +1,14 @@
+{
+  "data": [
+    { "id": 1, "type": "sites", "attributes": { "name": "zeta.example.com", "url": "https://zeta.example.com", "deployment_status": null, "php_version": "PHP 8.3", "repository": { "url": "git@github.com:acme/zeta.git", "branch": "main" }, "maintenance_mode": { "enabled": true, "status": null } },
+      "relationships": { "server": { "data": { "type": "servers", "id": "101" } }, "latestDeployment": { "data": { "type": "deployments", "id": "9001" } } } },
+    { "id": 2, "type": "sites", "attributes": { "name": "admin.example.com", "url": "https://admin.example.com", "deployment_status": "deploying", "repository": { "url": "git@github.com:acme/admin.git", "branch": "main" }, "aliases": null },
+      "relationships": { "server": { "data": { "type": "servers", "id": "101" } }, "latestDeployment": { "data": null } } },
+    { "id": 3, "type": "sites", "attributes": { "name": "orphan.example.com" }, "relationships": { "latestDeployment": { "data": null } } }
+  ],
+  "included": [
+    { "id": "9001", "type": "deployments", "attributes": { "status": "finished", "started_at": "2026-11-15T10:00:00Z", "ended_at": "2026-11-15T10:01:30Z", "commit": { "hash": "abcdef1234567", "message": "Fix the thing\n\nLonger body" } } },
+    { "id": "101", "type": "servers", "attributes": { "name": "app-1" } }
+  ],
+  "meta": { "next_cursor": null }
+}

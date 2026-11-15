@@ -1,0 +1,1335 @@
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
+using Forge.App.Services;
+using Forge.Core.Model;
+using Forge.Core.Service;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
+using Microsoft.UI.Windowing;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Windows.Graphics;
+using Windows.System;
+using Windows.UI.Core;
+using DispatcherQueueTimer = Microsoft.UI.Dispatching.DispatcherQueueTimer;
+using DispatcherQueuePriority = Microsoft.UI.Dispatching.DispatcherQueuePriority;
+
+namespace Forge.App.Views;
+
+/// <summary>
+/// The flyout above the tray. One surface, one cursor: the tree, a server's
+/// or site's actions, a feed, a log — all are a different set of rows or a
+/// pane pushed over the tree. Every write arms on its first press and is
+/// sent by a capital Y, and by nothing else.
+/// </summary>
+public sealed partial class PanelWindow : Window
+{
+    private const int WidthDip = 460;
+    private const int HeightDip = 680;
+
+    private readonly ForgeService _service;
+    private readonly Action _openSettings;
+    private readonly List<Nav> _nav = [new NavTree()];
+    private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
+    private readonly DispatcherQueueTimer _armTimer;
+    private readonly DispatcherQueueTimer _flashTimer;
+    private readonly DispatcherQueueTimer _clock;
+
+    private List<RowItem> _rows = [];
+    private int _cursor;
+    private string? _preferKey;
+
+    private string _armedKey = "";
+    private string _armedText = "";
+    private Func<bool>? _armedValid;
+    private Func<Task>? _armedSend;
+    private string _busyKey = "";
+
+    private bool _visible;
+    private bool _closing;
+    private long _hiddenAtMs;
+    private IReadOnlyList<string>? _paneShown;
+
+    public PanelWindow(ForgeService service, Action openSettings)
+    {
+        _service = service;
+        _openSettings = openSettings;
+        InitializeComponent();
+
+        var queue = DispatcherQueue;
+        _armTimer = queue.CreateTimer();
+        _armTimer.Interval = TimeSpan.FromSeconds(8);
+        _armTimer.IsRepeating = false;
+        // Expiry drops the arm but never takes the keyboard back: the next key is overwhelmingly Y.
+        _armTimer.Tick += (_, _) =>
+        {
+            if (_armedKey == "") return;
+            Disarm();
+            Flash("Not sent — the confirm timed out");
+            Render();
+        };
+        _flashTimer = queue.CreateTimer();
+        _flashTimer.Interval = TimeSpan.FromSeconds(6);
+        _flashTimer.IsRepeating = false;
+        _flashTimer.Tick += (_, _) => FlashText.Visibility = Visibility.Collapsed;
+        _clock = queue.CreateTimer();
+        _clock.Interval = TimeSpan.FromSeconds(30);
+        _clock.Tick += (_, _) => { if (_visible) Render(); };
+        _clock.Start();
+
+        CommandBox.TextChanged += (_, _) => { if (Top is NavCommand) RenderCommand(); };
+        ConfigureWindow();
+    }
+
+    private Nav Top => _nav[^1];
+    private RowItem? CursorRow => _cursor >= 0 && _cursor < _rows.Count ? _rows[_cursor] : null;
+    private static long NowMs => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+    // ------------------------------------------------------------- window
+
+    private void ConfigureWindow()
+    {
+        ExtendsContentIntoTitleBar = true;
+        SystemBackdrop = new DesktopAcrylicBackdrop();
+        AppWindow.IsShownInSwitchers = false;
+        var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "forge.ico");
+        if (File.Exists(icon)) AppWindow.SetIcon(icon);
+        if (AppWindow.Presenter is OverlappedPresenter p)
+        {
+            p.IsResizable = false;
+            p.IsMaximizable = false;
+            p.IsMinimizable = false;
+            p.IsAlwaysOnTop = true;
+            p.SetBorderAndTitleBar(true, false);
+        }
+        AppWindow.Closing += (_, e) =>
+        {
+            if (_closing) return;
+            e.Cancel = true;
+            HidePanel();
+        };
+        Activated += (_, e) =>
+        {
+            if (e.WindowActivationState == WindowActivationState.Deactivated && _visible) HidePanel();
+        };
+    }
+
+    public void Toggle()
+    {
+        if (_visible) HidePanel();
+        // A click on the tray icon deactivates the panel first; that hide is the toggle.
+        else if (NowMs - _hiddenAtMs > 400) ShowPanel();
+    }
+
+    public void ShowPanel()
+    {
+        PlaceNearTray();
+        AppWindow.Show();
+        Activate();
+        SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
+        _visible = true;
+        Render();
+        FocusContent();
+    }
+
+    public void HidePanel()
+    {
+        if (!_visible) return;
+        Disarm();
+        _visible = false;
+        _hiddenAtMs = NowMs;
+        AppWindow.Hide();
+    }
+
+    public void CloseForGood()
+    {
+        _closing = true;
+        _clock.Stop();
+        Close();
+    }
+
+    public void OnServiceChanged()
+    {
+        if (_visible) Render();
+    }
+
+    /// <summary>Bottom-right of the work area (or whichever corner the taskbar is in), on the display under the pointer.</summary>
+    private void PlaceNearTray()
+    {
+        GetCursorPos(out var pt);
+        var display = DisplayArea.GetFromPoint(new PointInt32(pt.X, pt.Y), DisplayAreaFallback.Primary);
+        var work = display.WorkArea;
+        var outer = display.OuterBounds;
+        AppWindow.Move(new PointInt32(work.X + 8, work.Y + 8));
+        var scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
+        var w = (int)(WidthDip * scale);
+        var h = (int)Math.Min(HeightDip * scale, work.Height - 24 * scale);
+        var margin = (int)(12 * scale);
+        var x = work.X > outer.X ? work.X + margin : work.X + work.Width - w - margin;
+        var y = work.Y > outer.Y ? work.Y + margin : work.Y + work.Height - h - margin;
+        AppWindow.MoveAndResize(new RectInt32(x, y, w, h));
+    }
+
+    private void FocusContent()
+    {
+        switch (Top)
+        {
+            case NavCommand:
+                CommandBox.Focus(FocusState.Programmatic);
+                break;
+            case NavPane:
+                PaneScroll.Focus(FocusState.Programmatic);
+                break;
+            default:
+                RowList.Focus(FocusState.Programmatic);
+                break;
+        }
+    }
+
+    // ------------------------------------------------------------- render
+
+    private void Render()
+    {
+        var snap = _service.Snapshot;
+        DetailPanel.Children.Clear();
+        List<RowItem> rows;
+        switch (Top)
+        {
+            case NavServer s: rows = ServerRows(snap, s); break;
+            case NavSite s: rows = SiteRows(snap, s); break;
+            case NavList l: rows = ListRows(snap, l); break;
+            case NavPane p: rows = []; RenderPane(p); break;
+            case NavCommand: rows = []; RenderCommand(); break;
+            default: rows = TreeRows(snap); break;
+        }
+
+        foreach (var row in rows)
+        {
+            row.Armed = row.ArmKey != "" && row.ArmKey == _armedKey;
+            row.Busy = row.ArmKey != "" && row.ArmKey == _busyKey;
+            if (row.Armed) row.Status = _armedText;
+        }
+
+        RowList.Visibility = Top is NavPane or NavCommand ? Visibility.Collapsed : Visibility.Visible;
+        PanePanel.Visibility = Top is NavPane ? Visibility.Visible : Visibility.Collapsed;
+        CommandPanel.Visibility = Top is NavCommand ? Visibility.Visible : Visibility.Collapsed;
+        ApplyRows(rows);
+        HintText.Text = Hint();
+        QueueSnapshot();
+    }
+
+    // Screen capture APIs see a WinUI window as black, so a development build can
+    // render its own XAML to a PNG instead. Off unless FORGE_SNAPSHOT_DIR is set.
+    private static readonly string? SnapshotDir = Environment.GetEnvironmentVariable("FORGE_SNAPSHOT_DIR");
+    private bool _snapshotQueued;
+    private DispatcherQueueTimer? _snapshotTimer;
+
+    private void QueueSnapshot()
+    {
+        if (string.IsNullOrEmpty(SnapshotDir) || _snapshotQueued || !_visible) return;
+        _snapshotQueued = true;
+        // Held in a field: a timer only a local refers to can be collected before it ever ticks.
+        _snapshotTimer ??= DispatcherQueue.CreateTimer();
+        var timer = _snapshotTimer;
+        timer.Stop();
+        timer.Interval = TimeSpan.FromMilliseconds(700);
+        timer.IsRepeating = false;
+        timer.Tick -= SnapshotTick;
+        timer.Tick += SnapshotTick;
+        timer.Start();
+    }
+
+    private async void SnapshotTick(DispatcherQueueTimer sender, object args)
+    {
+        _snapshotQueued = false;
+        try
+        {
+            var target = new Microsoft.UI.Xaml.Media.Imaging.RenderTargetBitmap();
+            await target.RenderAsync(Root);
+            var pixels = await target.GetPixelsAsync();
+            var path = Path.Combine(SnapshotDir!, "panel.png");
+            using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+            var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(Windows.Graphics.Imaging.BitmapEncoder.PngEncoderId, stream);
+            encoder.SetPixelData(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
+                (uint)target.PixelWidth, (uint)target.PixelHeight, 96, 96, pixels.ToArray());
+            await encoder.FlushAsync();
+            stream.Seek(0);
+            using var file = File.Create(path);
+            await stream.AsStreamForRead().CopyToAsync(file);
+        }
+        catch (Exception e)
+        {
+            Log.Write("Snapshot: " + e.Message);
+        }
+    }
+
+    private void ApplyRows(List<RowItem> rows)
+    {
+        var key = _preferKey ?? CursorRow?.Key;
+        _preferKey = null;
+        _rows = rows;
+        RowList.ItemsSource = rows;
+        var index = key is null ? -1 : rows.FindIndex(r => r.Key == key);
+        _cursor = index >= 0 ? index : Math.Clamp(_cursor, 0, Math.Max(0, rows.Count - 1));
+        if (rows.Count == 0) return;
+        RowList.SelectedIndex = _cursor;
+        RowList.ScrollIntoView(rows[_cursor]);
+        if (_visible && Top is not (NavPane or NavCommand))
+            DispatcherQueue.TryEnqueue(() => RowList.Focus(FocusState.Programmatic));
+    }
+
+    private void SetHero(string crumb, string title, string subtitle, Tone? tone)
+    {
+        CrumbText.Text = crumb;
+        CrumbText.Visibility = crumb == "" ? Visibility.Collapsed : Visibility.Visible;
+        TitleText.Text = title;
+        SubtitleText.Text = subtitle;
+        SubtitleText.Visibility = subtitle == "" ? Visibility.Collapsed : Visibility.Visible;
+        HeroDot.Visibility = tone is null ? Visibility.Collapsed : Visibility.Visible;
+        if (tone is { } t)
+        {
+            HeroDot.Fill = t == Tone.Warn ? Palette.Transparent : Palette.For(t);
+            HeroDot.Stroke = t == Tone.Warn ? Palette.For(t) : Palette.Transparent;
+        }
+    }
+
+    private void AddDetail(string text, Brush? brush = null)
+    {
+        DetailPanel.Children.Add(new TextBlock
+        {
+            Text = text,
+            TextWrapping = TextWrapping.Wrap,
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = brush ?? Palette.Secondary,
+        });
+    }
+
+    private static string ServerKey(string org, string serverId) => $"server|{org}|{serverId}";
+    private static string SiteRowKey(string org, string siteKey) => $"site|{org}|{siteKey}";
+    private static string DeployKey(string org, string siteKey) => $"deploy|{org}|{siteKey}";
+
+    private static RowItem Info(string key, string title, string detail = "", Tone tone = Tone.Idle, object? payload = null) =>
+        new() { Key = key, Kind = RowKind.Info, Title = title, Detail = detail, Tone = tone, Payload = payload };
+
+    private List<RowItem> TreeRows(ForgeSnapshot snap)
+    {
+        var rows = new List<RowItem>();
+        var now = NowMs;
+        var refreshing = snap.Orgs.Any(o => o.Refreshing);
+        var last = snap.Orgs.Count == 0 ? 0 : snap.Orgs.Max(o => o.LastRefreshMs);
+        var when = refreshing ? "refreshing…" : last > 0 ? "updated " + ForgeText.RelativeMs(last, now) : "";
+        SetHero("", snap.Orgs.Count == 1 ? snap.Orgs[0].Label : "Forge",
+            string.Join(" · ", new[] { snap.Summary.Replace("Forge — ", ""), when }.Where(s => s != "")),
+            Palette.ToneOf(snap.Health));
+
+        if (snap.NeedsSetup)
+        {
+            rows.Add(Info("setup", "Add a Forge API token to get started", "Press Enter to open Settings", Tone.Warn, "settings"));
+            return rows;
+        }
+
+        var many = snap.Orgs.Count > 1;
+        foreach (var org in snap.Orgs)
+        {
+            if (many)
+                rows.Add(new RowItem
+                {
+                    Key = "org|" + org.Slug, Kind = RowKind.Org, Org = org.Slug, Title = org.Label,
+                    Tone = Palette.ToneOf(org.Health), Status = HealthWord(org.Health),
+                });
+            if (org.AccountError != "") rows.Add(Info("token|" + org.Slug, org.AccountError, "Press Enter to open Settings", Tone.Warn, "settings"));
+            else if (org.LastError != "") rows.Add(Info("error|" + org.Slug, org.LastError, "", Tone.Bad));
+            if (org.Note != "") rows.Add(Info("note|" + org.Slug, org.Note));
+            if (org.Servers.Count == 0)
+            {
+                rows.Add(Info("empty|" + org.Slug, org.LastRefreshMs == 0 ? "Loading…" : "No servers in this organization"));
+                continue;
+            }
+
+            var depth = many ? 1 : 0;
+            foreach (var server in org.Servers)
+            {
+                var key = ServerKey(org.Slug, server.Id);
+                var sites = org.SitesOf(server.Id);
+                var expanded = !_collapsed.Contains(key);
+                rows.Add(new RowItem
+                {
+                    Key = key, Kind = RowKind.Server, Org = org.Slug, Title = server.Name,
+                    Detail = Status.ServerMeta(server),
+                    Status = server.State == ServerState.Ready
+                        ? sites.Count == 0 ? "no sites" : ForgeText.Pluralize(sites.Count, "site") + Worst(sites, expanded)
+                        : Status.ServerStateLabel(server.State),
+                    Tone = Status.ServerTone(server.State), Depth = depth,
+                    Expanded = sites.Count > 0 ? expanded : null, HasCog = true, Payload = server,
+                });
+                if (!expanded) continue;
+                foreach (var site in sites)
+                {
+                    var st = Status.SiteStatus(site);
+                    rows.Add(new RowItem
+                    {
+                        Key = SiteRowKey(org.Slug, site.Key), Kind = RowKind.Site, Org = org.Slug,
+                        Title = site.Name, Detail = SiteLine(site), Status = st.Label,
+                        Time = st.Timed ? ForgeText.RelativeTime(site.DeployedAt, now) : "",
+                        Tone = st.Tone, Depth = depth + 1, ArmKey = DeployKey(org.Slug, site.Key), Payload = site,
+                    });
+                }
+            }
+        }
+        return rows;
+    }
+
+    /// <summary>A folded server still says when something under it needs looking at.</summary>
+    private static string Worst(IReadOnlyList<Site> sites, bool expanded)
+    {
+        if (expanded) return "";
+        var tones = sites.Select(Status.SiteTone).ToList();
+        if (tones.Contains(Tone.Bad)) return " · failed";
+        if (tones.Contains(Tone.Busy)) return " · deploying";
+        if (tones.Contains(Tone.Warn)) return " · maintenance";
+        return "";
+    }
+
+    private static string HealthWord(Health health) => health switch
+    {
+        Health.Bad => "needs attention",
+        Health.Error => "request failed",
+        Health.Setup => "needs a token",
+        Health.Busy => "deploying",
+        Health.Maintenance => "maintenance",
+        _ => "",
+    };
+
+    private static string SiteLine(Site site)
+    {
+        var parts = new List<string>();
+        if (site.Branch != "") parts.Add(site.Branch);
+        if (site.CommitHash != "") parts.Add((site.CommitHash + " " + site.CommitMessage).Trim());
+        if (parts.Count == 0 && site.RepoUrl == "") parts.Add("no repository");
+        return string.Join(" · ", parts);
+    }
+
+    private RowItem ActionRow(ActionSpec a, string org, string subjectKey, string deploySiteKey = "") => new()
+    {
+        Key = "action|" + a.Id,
+        Kind = RowKind.Action,
+        Org = org,
+        Title = a.Label,
+        Status = a.Available ? a.Hint : a.Reason,
+        Enabled = a.Available,
+        ArmKey = !a.Armable ? "" : a.ArmsSubject ? DeployKey(org, deploySiteKey) : $"{a.Id}|{org}|{subjectKey}|{a.ArmIntent}",
+        Payload = a,
+    };
+
+    private List<RowItem> ServerRows(ForgeSnapshot snap, NavServer nav)
+    {
+        var org = snap.Org(nav.Org);
+        var server = org?.ServerById(nav.ServerId);
+        SetHero(org?.Label ?? nav.Org, server?.Name ?? "Server",
+            server is null ? "No longer listed"
+                : string.Join(" · ", new[] { Status.ServerStateLabel(server.State), server.Kind, Status.ServerMeta(server) }.Where(s => s != "")),
+            server is null ? Tone.Idle : Status.ServerTone(server.State));
+        return Actions.ServerActions(nav.Org, server).Select(a => ActionRow(a, nav.Org, nav.ServerId)).ToList();
+    }
+
+    private List<RowItem> SiteRows(ForgeSnapshot snap, NavSite nav)
+    {
+        var org = snap.Org(nav.Org);
+        var site = org?.SiteByKey(nav.SiteKey);
+        var server = site is null ? null : org!.ServerById(site.ServerId);
+        var st = Status.SiteStatus(site);
+        var subtitle = site is null ? "No longer listed"
+            : string.Join(" · ", new[]
+            {
+                st.Label + (st.Timed && site.DeployedAt != "" ? " " + ForgeText.RelativeTime(site.DeployedAt, NowMs) : ""),
+                SiteLine(site),
+            }.Where(s => s != ""));
+        SetHero($"{org?.Label ?? nav.Org} › {server?.Name ?? "server"}", site?.Name ?? "Site", subtitle, st.Tone);
+        foreach (var (label, value) in Status.SiteDetails(site)) AddDetail($"{label}: {value}");
+        return Actions.SiteActions(nav.Org, site).Select(a => ActionRow(a, nav.Org, nav.SiteKey, nav.SiteKey)).ToList();
+    }
+
+    private List<RowItem> ListRows(ForgeSnapshot snap, NavList nav)
+    {
+        var org = snap.Org(nav.Org);
+        var server = org?.ServerById(nav.ServerId);
+        var site = nav.SiteKey == "" ? null : org?.SiteByKey(nav.SiteKey);
+        var (title, empty) = nav.Kind switch
+        {
+            ListKind.Events => ("Server events", "No events"),
+            ListKind.Recipes => ("Run a recipe", "This organization has no recipes"),
+            ListKind.Monitors => ("Monitors", "No monitors on this server"),
+            _ => ("Heartbeats", "No heartbeats for this site"),
+        };
+        SetHero($"{org?.Label ?? nav.Org} › {site?.Name ?? server?.Name ?? ""}", title,
+            nav.Kind == ListKind.Recipes ? "Runs as the recipe's user on " + (server?.Name ?? "this server") : "", null);
+
+        var rows = new List<RowItem>();
+        if (nav.Error is not null) rows.Add(Info("list-error", nav.Error, "", Tone.Bad));
+        var now = NowMs;
+        foreach (var item in nav.Items)
+        {
+            switch (item)
+            {
+                case ForgeEvent e:
+                    rows.Add(new RowItem
+                    {
+                        Key = "event|" + e.Id, Kind = RowKind.Event, Org = nav.Org, Title = e.Description,
+                        Detail = string.Join(" · ", new[] { e.SiteName, e.RanAs == "" ? "" : "as " + e.RanAs }.Where(s => s != "")),
+                        Status = ForgeText.RelativeTime(e.CreatedAt, now), Payload = e,
+                    });
+                    break;
+                case Recipe r:
+                    var spec = Actions.RecipeRun(nav.Org, server, r);
+                    rows.Add(new RowItem
+                    {
+                        Key = "recipe|" + r.Id, Kind = RowKind.Recipe, Org = nav.Org, Title = r.Name,
+                        Detail = string.Join(" · ", new[] { r.User == "" ? "" : "as " + r.User, r.FirstLine }.Where(s => s != "")),
+                        Status = spec.Available ? "" : spec.Reason, Enabled = spec.Available,
+                        ArmKey = $"recipe-run|{nav.Org}|{nav.ServerId}|{r.Id}", Payload = r,
+                    });
+                    break;
+                case ServerMonitor m:
+                    var (mLabel, mTone) = Status.MonitorStatus(m);
+                    rows.Add(new RowItem
+                    {
+                        Key = "monitor|" + m.Id, Kind = RowKind.Monitor, Org = nav.Org, Title = Status.MonitorLabel(m),
+                        Detail = Status.MonitorDetail(m), Status = mLabel, Tone = mTone,
+                        Time = ForgeText.RelativeTime(m.StateChangedAt, now), Payload = m,
+                    });
+                    break;
+                case Heartbeat h:
+                    var (hLabel, hTone) = Status.HeartbeatStatus(h);
+                    rows.Add(new RowItem
+                    {
+                        Key = "heartbeat|" + h.Id, Kind = RowKind.Heartbeat, Org = nav.Org, Title = h.Name,
+                        Detail = Status.HeartbeatDetail(h), Status = hLabel, Tone = hTone, Payload = h,
+                    });
+                    break;
+            }
+        }
+        if (nav.Loading) rows.Add(Info("list-loading", "Loading…"));
+        else if (nav.Error is null && nav.Items.Count == 0) rows.Add(Info("list-empty", empty));
+        if (!nav.Loading && nav.Cursor != "") rows.Add(new RowItem { Key = "more", Kind = RowKind.More, Title = "Load more…" });
+        return rows;
+    }
+
+    private void RenderPane(NavPane pane)
+    {
+        SetHero(pane.Crumb, pane.Title, pane.Loading ? "Loading…" : pane.Watch is not null ? "Following the run" : "", null);
+        PaneHeader.Text = pane.Error ?? pane.Header;
+        PaneHeader.Visibility = PaneHeader.Text == "" ? Visibility.Collapsed : Visibility.Visible;
+        PaneHeader.Foreground = pane.Error is not null || pane.Bad ? Palette.For(Tone.Bad) : Palette.Secondary;
+        if (!ReferenceEquals(_paneShown, pane.Lines) || pane.Lines.Count == 0)
+        {
+            _paneShown = pane.Lines;
+            PaneText.Text = pane.Lines.Count > 0 ? string.Join("\n", pane.Lines)
+                : pane.Loading || pane.Error is not null ? "" : pane.EmptyText;
+            if (pane.Lines.Count > 0)
+                // The answer is in the tail; scroll once the text has been laid out.
+                DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low,
+                    () => PaneScroll.ChangeView(0, PaneScroll.ScrollableHeight, null, disableAnimation: true));
+        }
+    }
+
+    private void RenderCommand()
+    {
+        if (Top is not NavCommand nav) return;
+        var site = _service.Snapshot.Org(nav.Org)?.SiteByKey(nav.SiteKey);
+        SetHero(site?.Name ?? "", "Run a command", "", null);
+        var spec = Actions.SiteCommand(nav.Org, site, CommandBox.Text);
+        var armed = _armedKey != "" && _armedKey == CommandArmKey(nav, spec.ArmIntent);
+        CommandState.Text = armed ? _armedText + " · any other key cancels"
+            : _busyKey.StartsWith("command-run|", StringComparison.Ordinal) ? "sending…"
+            : spec.Available ? "Enter arms it, then a capital Y sends it" : spec.Reason;
+        CommandState.Foreground = armed ? Palette.Accent : Palette.Secondary;
+    }
+
+    private string Hint()
+    {
+        if (_armedKey != "") return "[Y] confirm · any other key cancels";
+        return Top switch
+        {
+            NavPane p => p.Watch is not null ? "r look again · c copy · w save · ← back" : "c copy · w save · r reload · ← back",
+            NavCommand => "⏎ arm · Y send · Esc back",
+            NavList => "⏎ open · r reload · ← back · Esc close",
+            NavServer => "⏎ select · e events · s ssh · t terminal · ← back",
+            NavSite => "⏎ select · d deploy · o open · f Forge · ← back",
+            _ => CursorRow?.Kind switch
+            {
+                RowKind.Site => "⏎ open · d deploy · o site · f Forge · s ssh · r refresh",
+                RowKind.Server => "⏎ fold · → actions · e events · s ssh · t terminal",
+                _ => "↑↓ move · r refresh · , settings · Esc close",
+            },
+        };
+    }
+
+    private void Flash(string message, bool bad = false)
+    {
+        FlashText.Text = message;
+        FlashText.Foreground = bad ? Palette.For(Tone.Bad) : Palette.Accent;
+        FlashText.Visibility = message == "" ? Visibility.Collapsed : Visibility.Visible;
+        _flashTimer.Stop();
+        _flashTimer.Start();
+    }
+
+    // --------------------------------------------------------- navigation
+
+    private void Push(Nav nav)
+    {
+        nav.ReturnKey = CursorRow?.Key ?? "";
+        _nav.Add(nav);
+        _cursor = 0;
+        _preferKey = null;
+        _paneShown = null;
+        Render();
+        FocusContent();
+    }
+
+    /// <summary>A command prompt that has sent is replaced, not covered: backing onto it invites running it twice.</summary>
+    private void ReplaceTop(Nav nav)
+    {
+        nav.ReturnKey = Top.ReturnKey;
+        _nav[^1] = nav;
+        _cursor = 0;
+        _paneShown = null;
+        Render();
+        FocusContent();
+    }
+
+    private void Pop()
+    {
+        if (_nav.Count <= 1) return;
+        var top = _nav[^1];
+        _nav.RemoveAt(_nav.Count - 1);
+        if (top is NavPane { Watch: { } watch }) watch.Stop();
+        _preferKey = top.ReturnKey;
+        _paneShown = null;
+        Render();
+        FocusContent();
+    }
+
+    private void Move(int delta) => MoveTo(_cursor + delta);
+
+    private void MoveTo(int index)
+    {
+        if (_rows.Count == 0) return;
+        _cursor = Math.Clamp(index, 0, _rows.Count - 1);
+        RowList.SelectedIndex = _cursor;
+        RowList.ScrollIntoView(_rows[_cursor]);
+        HintText.Text = Hint();
+    }
+
+    private void Activate(RowItem row)
+    {
+        switch (row.Kind)
+        {
+            case RowKind.Info when row.Payload as string == "settings":
+                _openSettings();
+                break;
+            case RowKind.Server:
+                ToggleFold(row);
+                break;
+            case RowKind.Site when row.Payload is Site site:
+                Push(new NavSite { Org = row.Org, SiteKey = site.Key });
+                break;
+            case RowKind.Action when row.Payload is ActionSpec spec:
+                RunAction(row, spec);
+                break;
+            case RowKind.Event when row.Payload is ForgeEvent ev && Top is NavList list:
+                OpenEventOutput(list, ev);
+                break;
+            case RowKind.Recipe when row.Payload is Recipe recipe && Top is NavList list:
+                ArmRecipe(list, row, recipe);
+                break;
+            case RowKind.More when Top is NavList list:
+                _ = LoadList(list, list.Cursor);
+                break;
+        }
+    }
+
+    private void ToggleFold(RowItem row)
+    {
+        if (row.Expanded is null || row.Payload is not Server server) return;
+        if (_collapsed.Remove(row.Key)) _ = _service.FetchServerSitesAsync(row.Org, server.Id);
+        else _collapsed.Add(row.Key);
+        Render();
+    }
+
+    private void DrillIn()
+    {
+        if (CursorRow is not { } row) return;
+        switch (row.Kind)
+        {
+            case RowKind.Server when row.Payload is Server server:
+                if (_collapsed.Contains(row.Key)) ToggleFold(row);
+                else Push(new NavServer { Org = row.Org, ServerId = server.Id });
+                break;
+            default:
+                Activate(row);
+                break;
+        }
+    }
+
+    private void Back()
+    {
+        if (_nav.Count > 1) { Pop(); return; }
+        if (CursorRow is not { } row) return;
+        if (row is { Kind: RowKind.Server, Expanded: true }) { ToggleFold(row); return; }
+        if (row is { Kind: RowKind.Site, Payload: Site site })
+        {
+            var index = _rows.FindIndex(r => r.Key == ServerKey(row.Org, site.ServerId));
+            if (index >= 0) MoveTo(index);
+        }
+    }
+
+    // ------------------------------------------------------------ subjects
+
+    private (string Org, Site Site)? CurrentSite()
+    {
+        var snap = _service.Snapshot;
+        string org, key;
+        switch (Top)
+        {
+            case NavSite s: org = s.Org; key = s.SiteKey; break;
+            case NavCommand c: org = c.Org; key = c.SiteKey; break;
+            case NavPane { SiteKey: not "" } p: org = p.Org; key = p.SiteKey; break;
+            case NavList { SiteKey: not "" } l: org = l.Org; key = l.SiteKey; break;
+            case NavTree when CursorRow is { Kind: RowKind.Site, Payload: Site s }: org = CursorRow.Org; key = s.Key; break;
+            default: return null;
+        }
+        return snap.Org(org)?.SiteByKey(key) is { } site ? (org, site) : null;
+    }
+
+    private (string Org, Server Server)? CurrentServer()
+    {
+        var snap = _service.Snapshot;
+        string org, id;
+        switch (Top)
+        {
+            case NavServer s: org = s.Org; id = s.ServerId; break;
+            case NavList { ServerId: not "" } l: org = l.Org; id = l.ServerId; break;
+            case NavPane { ServerId: not "" } p: org = p.Org; id = p.ServerId; break;
+            case NavTree when CursorRow is { Kind: RowKind.Server, Payload: Server s }: org = CursorRow.Org; id = s.Id; break;
+            default:
+                if (CurrentSite() is not { } cs) return null;
+                org = cs.Org;
+                id = cs.Site.ServerId;
+                break;
+        }
+        return snap.Org(org)?.ServerById(id) is { } server ? (org, server) : null;
+    }
+
+    // ------------------------------------------------------------- actions
+
+    private void Arm(string key, string text, Func<bool> valid, Func<Task> send)
+    {
+        _armedKey = key;
+        _armedText = text;
+        _armedValid = valid;
+        _armedSend = send;
+        _armTimer.Stop();
+        _armTimer.Start();
+        Render();
+    }
+
+    private void Disarm()
+    {
+        _armedKey = "";
+        _armedText = "";
+        _armedValid = null;
+        _armedSend = null;
+        _armTimer.Stop();
+    }
+
+    private async void Confirm()
+    {
+        if (_armedKey == "" || _armedSend is null) return;
+        var key = _armedKey;
+        var valid = _armedValid;
+        var send = _armedSend;
+        Disarm();
+        // What an arm pointed at can change under it — a refresh that flips maintenance mode, a site that went away.
+        if (valid is not null && !valid())
+        {
+            Flash("That changed while it was armed — nothing was sent", bad: true);
+            Render();
+            return;
+        }
+        _busyKey = key;
+        Render();
+        try
+        {
+            await send();
+        }
+        catch (Exception e)
+        {
+            Flash(e.Message, bad: true);
+        }
+        finally
+        {
+            _busyKey = "";
+            Render();
+        }
+    }
+
+    private bool RowStillArmable(string key) =>
+        Top switch
+        {
+            NavServer s => ServerRows(_service.Snapshot, s).Any(r => r.ArmKey == key && r.Enabled),
+            NavSite s => SiteRows(_service.Snapshot, s).Any(r => r.ArmKey == key && r.Enabled),
+            _ => false,
+        };
+
+    private void RunAction(RowItem row, ActionSpec spec)
+    {
+        if (!spec.Available)
+        {
+            Flash(spec.Reason == "" ? "Not available" : spec.Reason);
+            return;
+        }
+        if (row.ArmKey != "")
+        {
+            if (spec.ArmsSubject) { ArmDeploy(); return; }
+            var org = row.Org;
+            var serverId = Top switch
+            {
+                NavServer s => s.ServerId,
+                _ => CurrentSite()?.Site.ServerId ?? "",
+            };
+            Arm(row.ArmKey, spec.ArmedText, () => RowStillArmable(row.ArmKey), async () =>
+            {
+                var outcome = await _service.SendActionAsync(org, serverId, spec);
+                Flash(outcome.Message, !outcome.Ok);
+            });
+            return;
+        }
+
+        switch (spec.Id)
+        {
+            case "events": OpenList(ListKind.Events); break;
+            case "recipes": OpenList(ListKind.Recipes); break;
+            case "monitors": OpenList(ListKind.Monitors); break;
+            case "heartbeats": OpenList(ListKind.Heartbeats); break;
+            case "forge": OpenForge(); break;
+            case "ssh": CopySsh(); break;
+            case "ssh-terminal": OpenTerminal(); break;
+            case "open": OpenSite(); break;
+            case "log": OpenDeployLog(); break;
+            case "command" when CurrentSite() is { } cs:
+                CommandBox.Text = "";
+                Push(new NavCommand { Org = cs.Org, SiteKey = cs.Site.Key });
+                break;
+            default:
+                if (spec.Log != "") OpenSiteLog(spec.Log);
+                break;
+        }
+    }
+
+    private void ArmDeploy()
+    {
+        if (CurrentSite() is not { } cs)
+        {
+            Flash("Pick a site to deploy");
+            return;
+        }
+        var (org, site) = cs;
+        if (!Status.CanDeploy(site))
+        {
+            Flash(site.Name + " has no repository to deploy");
+            return;
+        }
+        Arm(DeployKey(org, site.Key), "press Y to deploy " + site.Name,
+            () => _service.Snapshot.Org(org)?.SiteByKey(site.Key) is { } s && Status.CanDeploy(s),
+            async () =>
+            {
+                var latest = _service.Snapshot.Org(org)?.SiteByKey(site.Key) ?? site;
+                var outcome = await _service.DeployAsync(org, latest);
+                Flash(outcome.Ok ? $"{site.Name}: {outcome.Message}" : outcome.Message, !outcome.Ok);
+            });
+    }
+
+    private static string CommandArmKey(NavCommand nav, string text) => $"command-run|{nav.Org}|{nav.SiteKey}|{text}";
+
+    private void ArmCommand()
+    {
+        if (Top is not NavCommand nav) return;
+        var site = _service.Snapshot.Org(nav.Org)?.SiteByKey(nav.SiteKey);
+        var spec = Actions.SiteCommand(nav.Org, site, CommandBox.Text);
+        if (!spec.Available || site is null)
+        {
+            Flash(spec.Reason);
+            return;
+        }
+        var text = spec.ArmIntent;
+        Arm(CommandArmKey(nav, text), spec.ArmedText,
+            () => Top == nav && CommandBox.Text.Trim() == text,
+            async () =>
+            {
+                var (outcome, watch) = await _service.RunCommandAsync(nav.Org, site, text);
+                Flash(outcome.Message, !outcome.Ok);
+                if (watch is null || Top != nav) return;
+                OpenRun(new NavPane
+                {
+                    Org = nav.Org, SiteKey = site.Key, Crumb = site.Name, Title = "$ " + text,
+                    FileName = $"forge-{ForgeText.SafeFileName(site.Name)}-command.out",
+                }, watch, replace: true);
+            });
+    }
+
+    private void ArmRecipe(NavList list, RowItem row, Recipe recipe)
+    {
+        var server = _service.Snapshot.Org(list.Org)?.ServerById(list.ServerId);
+        var spec = Actions.RecipeRun(list.Org, server, recipe);
+        if (!spec.Available || server is null)
+        {
+            Flash(spec.Reason);
+            return;
+        }
+        Arm(row.ArmKey, spec.ArmedText,
+            () => _service.Snapshot.Org(list.Org)?.ServerById(list.ServerId)?.State == ServerState.Ready,
+            async () =>
+            {
+                var (outcome, watch) = await _service.RunRecipeAsync(list.Org, server, recipe);
+                Flash(outcome.Message, !outcome.Ok);
+                if (watch is null) return;
+                OpenRun(new NavPane
+                {
+                    Org = list.Org, ServerId = server.Id, Crumb = server.Name, Title = recipe.Name,
+                    FileName = $"forge-{ForgeText.SafeFileName(server.Name)}-recipe-{ForgeText.SafeFileName(recipe.Name)}.out",
+                }, watch, replace: false);
+            });
+    }
+
+    private void OpenRun(NavPane pane, RunWatch watch, bool replace)
+    {
+        pane.Watch = watch;
+        pane.Header = watch.Latest.Header;
+        pane.Loading = true;
+        pane.EmptyText = "No output";
+        watch.Updated += update => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (pane.Watch != watch) return;
+            pane.Header = update.Header + (update.Message is null ? "" : " — " + update.Message);
+            pane.Bad = update.Bad;
+            if (update.Lines is not null) pane.Lines = update.Lines;
+            pane.Loading = update.Running && update.Lines is null && update.Message is null;
+            if (Top == pane) Render();
+        });
+        pane.Reload = () => { watch.Restart(); return Task.CompletedTask; };
+        if (replace) ReplaceTop(pane);
+        else Push(pane);
+    }
+
+    private void OpenDocument(NavPane pane, Func<Task<ReadResult<IReadOnlyList<string>>>> fetch)
+    {
+        pane.Reload = async () =>
+        {
+            pane.Loading = true;
+            pane.Error = null;
+            if (Top == pane) Render();
+            var result = await fetch();
+            pane.Loading = false;
+            if (result.Ok) pane.Lines = result.Value!;
+            else pane.Error = result.Error;
+            if (Top == pane) Render();
+        };
+        Push(pane);
+        _ = pane.Reload();
+    }
+
+    private void OpenDeployLog()
+    {
+        if (CurrentSite() is not { } cs) return;
+        var (org, site) = cs;
+        OpenDocument(new NavPane
+        {
+            Org = org, SiteKey = site.Key, Crumb = site.Name, Title = "Deployment log",
+            Header = Status.SiteStatus(site).Label + (site.CommitHash == "" ? "" : " · " + site.CommitHash),
+            Bad = Status.SiteTone(site) == Tone.Bad, EmptyText = "The deployment printed nothing",
+            FileName = $"forge-{ForgeText.SafeFileName(site.Name)}-{ForgeText.SafeFileName(site.DeploymentId)}.log",
+        }, () => _service.DeploymentLogAsync(org, site));
+    }
+
+    private void OpenSiteLog(string kind)
+    {
+        if (CurrentSite() is not { } cs) return;
+        var (org, site) = cs;
+        OpenDocument(new NavPane
+        {
+            Org = org, SiteKey = site.Key, Crumb = site.Name, Title = Actions.SiteLogLabel(kind),
+            EmptyText = "The log is empty",
+            FileName = $"forge-{ForgeText.SafeFileName(site.Name)}-{ForgeText.SafeFileName(kind)}.log",
+        }, () => _service.SiteLogAsync(org, site, kind));
+    }
+
+    private void OpenEventOutput(NavList list, ForgeEvent ev)
+    {
+        var server = _service.Snapshot.Org(list.Org)?.ServerById(list.ServerId);
+        OpenDocument(new NavPane
+        {
+            Org = list.Org, ServerId = list.ServerId, Crumb = server?.Name ?? "", Title = ev.Description,
+            Header = string.Join(" · ", new[] { ev.SiteName, ev.RanAs == "" ? "" : "as " + ev.RanAs }.Where(s => s != "")),
+            EmptyText = "The event printed nothing",
+            FileName = $"forge-{ForgeText.SafeFileName(server?.Name)}-event-{ForgeText.SafeFileName(ev.Id)}.log",
+        }, () => _service.EventOutputAsync(list.Org, list.ServerId, ev.Id));
+    }
+
+    private void OpenList(ListKind kind)
+    {
+        NavList list;
+        if (kind == ListKind.Heartbeats)
+        {
+            if (CurrentSite() is not { } cs) return;
+            list = new NavList { Kind = kind, Org = cs.Org, ServerId = cs.Site.ServerId, SiteKey = cs.Site.Key };
+        }
+        else
+        {
+            if (CurrentServer() is not { } server) { Flash("Pick a server first"); return; }
+            list = new NavList { Kind = kind, Org = server.Org, ServerId = server.Server.Id };
+        }
+        if (Top is NavPane or NavCommand) return;
+        Push(list);
+        _ = LoadList(list, null);
+    }
+
+    private async Task LoadList(NavList list, string? cursor)
+    {
+        list.Loading = true;
+        list.Error = null;
+        if (Top == list) Render();
+
+        (List<object>? Items, string? Error, string Next) result;
+        switch (list.Kind)
+        {
+            case ListKind.Events:
+            {
+                var r = await _service.EventsAsync(list.Org, list.ServerId, cursor);
+                result = (r.Value?.Cast<object>().ToList(), r.Error, r.NextCursor);
+                break;
+            }
+            case ListKind.Recipes:
+            {
+                var r = await _service.RecipesAsync(list.Org, cursor);
+                result = (r.Value?.Cast<object>().ToList(), r.Error, r.NextCursor);
+                break;
+            }
+            case ListKind.Monitors:
+            {
+                var r = await _service.MonitorsAsync(list.Org, list.ServerId, cursor);
+                result = (r.Value?.Cast<object>().ToList(), r.Error, r.NextCursor);
+                break;
+            }
+            default:
+            {
+                var site = _service.Snapshot.Org(list.Org)?.SiteByKey(list.SiteKey);
+                if (site is null) { result = (null, "That site is no longer listed", ""); break; }
+                var r = await _service.HeartbeatsAsync(list.Org, site, cursor);
+                result = (r.Value?.Cast<object>().ToList(), r.Error, r.NextCursor);
+                break;
+            }
+        }
+
+        list.Loading = false;
+        if (result.Error is not null) list.Error = result.Error;
+        else
+        {
+            if (cursor is null) list.Items = result.Items!;
+            else list.Items.AddRange(result.Items!);
+            list.Cursor = result.Next;
+        }
+        if (Top == list) Render();
+    }
+
+    private void OpenSite()
+    {
+        if (CurrentSite() is not { } cs) { Flash("Pick a site first"); return; }
+        if (!Shell.OpenUrl(cs.Site.Url)) Flash(cs.Site.Name + " has no address to open");
+    }
+
+    private void OpenForge()
+    {
+        var template = _service.Setup.Settings.DashboardUrlTemplate;
+        string url;
+        string org;
+        if (CurrentSite() is { } cs && Top is not NavServer && !(Top is NavTree && CursorRow?.Kind == RowKind.Server))
+        {
+            org = cs.Org;
+            var server = _service.Snapshot.Org(org)?.ServerById(cs.Site.ServerId);
+            url = server is null ? "" : ForgeText.DashboardUrl(template, org, server, cs.Site.Id);
+        }
+        else if (CurrentServer() is { } s)
+        {
+            org = s.Org;
+            url = ForgeText.DashboardUrl(template, org, s.Server, null);
+        }
+        else
+        {
+            org = CursorRow?.Org is { Length: > 0 } o ? o : _service.Setup.DefaultOrganization;
+            url = "";
+        }
+        if (url == "") url = ForgeText.OrgDashboardUrl(org);
+        Shell.OpenUrl(url);
+    }
+
+    private void CopySsh()
+    {
+        if (CurrentServer() is not { } s) { Flash("Pick a server or site first"); return; }
+        var command = ForgeText.SshCommand(s.Server);
+        if (command == "") { Flash(s.Server.Name + " has no public IP"); return; }
+        try
+        {
+            Shell.CopyText(command);
+            Flash("Copied: " + command);
+        }
+        catch (Exception e)
+        {
+            Flash("Could not copy: " + e.Message, bad: true);
+        }
+    }
+
+    private void OpenTerminal()
+    {
+        if (CurrentServer() is not { } s) { Flash("Pick a server or site first"); return; }
+        if (!Shell.OpenSsh(s.Server)) Flash(s.Server.Name + " has no address ssh can use", bad: true);
+        else HidePanel();
+    }
+
+    private void Refresh()
+    {
+        switch (Top)
+        {
+            case NavPane { Reload: { } reload }:
+                _ = reload();
+                break;
+            case NavList list:
+                _ = LoadList(list, null);
+                break;
+            default:
+                _service.RefreshNow();
+                Flash("Refreshing…");
+                break;
+        }
+    }
+
+    private void CopyPane(NavPane pane)
+    {
+        if (pane.Lines.Count == 0) { Flash("Nothing to copy"); return; }
+        Shell.CopyText(string.Join(Environment.NewLine, pane.Lines));
+        Flash($"Copied {ForgeText.Pluralize(pane.Lines.Count, "line")}");
+    }
+
+    private void SavePane(NavPane pane)
+    {
+        if (pane.Lines.Count == 0) { Flash("Nothing to save"); return; }
+        try
+        {
+            var folder = Shell.DownloadsFolder();
+            var name = Path.GetFileNameWithoutExtension(pane.FileName);
+            var ext = Path.GetExtension(pane.FileName);
+            var path = Path.Combine(folder, pane.FileName);
+            for (var i = 2; File.Exists(path); i++) path = Path.Combine(folder, $"{name}-{i}{ext}");
+            File.WriteAllText(path, string.Join(Environment.NewLine, pane.Lines) + Environment.NewLine);
+            Flash("Saved to " + path);
+        }
+        catch (Exception e)
+        {
+            Flash("Could not save: " + e.Message, bad: true);
+        }
+    }
+
+    // ---------------------------------------------------------------- input
+
+    private static bool IsDown(VirtualKey key) =>
+        InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(CoreVirtualKeyStates.Down);
+
+    private static bool IsModifier(VirtualKey key) => key is VirtualKey.Shift or VirtualKey.LeftShift or VirtualKey.RightShift
+        or VirtualKey.Control or VirtualKey.LeftControl or VirtualKey.RightControl or VirtualKey.Menu
+        or VirtualKey.LeftMenu or VirtualKey.RightMenu or VirtualKey.LeftWindows or VirtualKey.RightWindows
+        or VirtualKey.CapitalLock;
+
+    private const VirtualKey Comma = (VirtualKey)188;
+
+    private void Root_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        var key = e.Key;
+        if (IsModifier(key)) return;
+        var shift = IsDown(VirtualKey.Shift);
+        var ctrl = IsDown(VirtualKey.Control);
+
+        // An armed panel owns the next input: a capital Y sends, anything else drops the arm and does nothing else.
+        if (_armedKey != "")
+        {
+            e.Handled = true;
+            if (key == VirtualKey.Y && shift && !ctrl) Confirm();
+            else
+            {
+                Disarm();
+                Flash("Not sent");
+                Render();
+            }
+            return;
+        }
+
+        if (Top is NavCommand)
+        {
+            if (key == VirtualKey.Enter) { e.Handled = true; ArmCommand(); }
+            else if (key == VirtualKey.Escape) { e.Handled = true; Pop(); }
+            return;
+        }
+
+        if (Top is NavPane pane)
+        {
+            switch (key)
+            {
+                case VirtualKey.C when !ctrl: CopyPane(pane); e.Handled = true; return;
+                case VirtualKey.W: SavePane(pane); e.Handled = true; return;
+                case VirtualKey.R: Refresh(); e.Handled = true; return;
+                case VirtualKey.D: ArmDeploy(); e.Handled = true; return;
+                case VirtualKey.Escape or VirtualKey.Left or VirtualKey.H or VirtualKey.Back: Pop(); e.Handled = true; return;
+                case VirtualKey.J: PaneScroll.ChangeView(null, PaneScroll.VerticalOffset + 48, null); e.Handled = true; return;
+                case VirtualKey.K: PaneScroll.ChangeView(null, PaneScroll.VerticalOffset - 48, null); e.Handled = true; return;
+                default: return;
+            }
+        }
+
+        if (ctrl) return;
+        e.Handled = true;
+        switch (key)
+        {
+            case VirtualKey.Up or VirtualKey.K: Move(-1); break;
+            case VirtualKey.Down or VirtualKey.J: Move(1); break;
+            case VirtualKey.PageUp: Move(-8); break;
+            case VirtualKey.PageDown: Move(8); break;
+            case VirtualKey.Home: MoveTo(0); break;
+            case VirtualKey.End: MoveTo(_rows.Count - 1); break;
+            case VirtualKey.Enter or VirtualKey.Space: if (CursorRow is { } row) Activate(row); break;
+            case VirtualKey.Right or VirtualKey.L: DrillIn(); break;
+            case VirtualKey.Left or VirtualKey.H or VirtualKey.Back: Back(); break;
+            case VirtualKey.Escape: if (_nav.Count > 1) Pop(); else HidePanel(); break;
+            case VirtualKey.D: ArmDeploy(); break;
+            case VirtualKey.O: OpenSite(); break;
+            case VirtualKey.F: OpenForge(); break;
+            case VirtualKey.S: CopySsh(); break;
+            case VirtualKey.T: OpenTerminal(); break;
+            case VirtualKey.E: OpenList(ListKind.Events); break;
+            case VirtualKey.R: Refresh(); break;
+            case Comma: _openSettings(); break;
+            default: e.Handled = false; break;
+        }
+    }
+
+    private void RowList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is not RowItem row) return;
+        _cursor = _rows.IndexOf(row);
+        if (_armedKey != "")
+        {
+            // The pointer arms but never sends: a click while armed is a cancel like any other press.
+            Disarm();
+            Flash("Not sent");
+            Render();
+            return;
+        }
+        Activate(row);
+    }
+
+    private void RowList_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        if ((e.OriginalSource as FrameworkElement)?.DataContext is not RowItem row) return;
+        _cursor = _rows.IndexOf(row);
+        if (row is { Kind: RowKind.Server, Payload: Server server }) Push(new NavServer { Org = row.Org, ServerId = server.Id });
+        else if (row is { Kind: RowKind.Site, Payload: Site site }) Push(new NavSite { Org = row.Org, SiteKey = site.Key });
+    }
+
+    private void Cog_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string key }) return;
+        var index = _rows.FindIndex(r => r.Key == key);
+        if (index < 0 || _rows[index].Payload is not Server server) return;
+        _cursor = index;
+        Push(new NavServer { Org = _rows[index].Org, ServerId = server.Id });
+    }
+
+    private void RefreshButton_Click(object sender, RoutedEventArgs e) => Refresh();
+
+    private void SettingsButton_Click(object sender, RoutedEventArgs e) => _openSettings();
+
+    // ---------------------------------------------------------------- win32
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetCursorPos(out NativePoint point);
+
+    [LibraryImport("user32.dll")]
+    private static partial uint GetDpiForWindow(IntPtr hwnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetForegroundWindow(IntPtr hwnd);
+}
+
+// ------------------------------------------------------------------ routes
+
+internal abstract class Nav
+{
+    public string Org { get; init; } = "";
+    /// <summary>The row the view was opened from, so backing out lands on it.</summary>
+    public string ReturnKey { get; set; } = "";
+}
+
+internal sealed class NavTree : Nav;
+
+internal sealed class NavServer : Nav
+{
+    public string ServerId { get; init; } = "";
+}
+
+internal sealed class NavSite : Nav
+{
+    public string SiteKey { get; init; } = "";
+}
+
+internal sealed class NavCommand : Nav
+{
+    public string SiteKey { get; init; } = "";
+}
+
+internal enum ListKind { Events, Recipes, Monitors, Heartbeats }
+
+internal sealed class NavList : Nav
+{
+    public ListKind Kind { get; init; }
+    public string ServerId { get; init; } = "";
+    public string SiteKey { get; init; } = "";
+    public List<object> Items { get; set; } = [];
+    public string Cursor { get; set; } = "";
+    public bool Loading { get; set; }
+    public string? Error { get; set; }
+}
+
+internal sealed class NavPane : Nav
+{
+    public string ServerId { get; init; } = "";
+    public string SiteKey { get; init; } = "";
+    public string Crumb { get; init; } = "";
+    public string Title { get; init; } = "";
+    public string Header { get; set; } = "";
+    public bool Bad { get; set; }
+    public IReadOnlyList<string> Lines { get; set; } = [];
+    public bool Loading { get; set; } = true;
+    public string? Error { get; set; }
+    public string EmptyText { get; set; } = "Nothing in it";
+    public string FileName { get; init; } = "forge.log";
+    public Func<Task>? Reload { get; set; }
+    public RunWatch? Watch { get; set; }
+}

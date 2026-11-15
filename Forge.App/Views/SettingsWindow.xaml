@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Forge.App.Views.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Forge for Windows — Settings">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid x:Name="TitleBarArea" Height="40" Padding="16,0,0,0">
+            <TextBlock Text="Forge for Windows — Settings" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
+        </Grid>
+
+        <ScrollViewer Grid.Row="1">
+            <StackPanel Padding="28,8,28,32" Spacing="14" MaxWidth="680" HorizontalAlignment="Stretch">
+
+                <TextBlock Text="Accounts" Style="{StaticResource SubtitleTextBlockStyle}" />
+                <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           Text="One Forge API token per Forge account. Tokens are kept in Windows Credential Manager and never written to disk by this app." />
+                <StackPanel x:Name="AccountsPanel" Spacing="8" />
+
+                <Border Padding="16" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Add or update a token" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   Text="Read access to servers and sites is enough to watch them. Each write scope is opt-in: site:manage-deploys to deploy and read deploy logs, server:manage-services to restart services and reboot, site:manage-commands for maintenance mode and commands, server:manage-logs for site logs, recipe:view / recipe:manage for recipes." />
+                        <HyperlinkButton x:Name="TokenLink" Content="Create a token at forge.laravel.com/profile/api" Padding="0" Click="TokenLink_Click" />
+                        <TextBox x:Name="AccountNameBox" Header="Account name (optional)" PlaceholderText="work" />
+                        <PasswordBox x:Name="TokenBox" Header="API token" />
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button x:Name="VerifyButton" Content="Check token" Click="VerifyButton_Click" />
+                            <ProgressRing x:Name="VerifyRing" IsActive="False" Width="20" Height="20" />
+                        </StackPanel>
+                        <InfoBar x:Name="VerifyInfo" IsOpen="False" IsClosable="False" />
+                        <StackPanel x:Name="OrgPicker" Visibility="Collapsed" Spacing="6">
+                            <TextBlock Text="Organizations to watch" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <StackPanel x:Name="OrgChecks" />
+                            <Button x:Name="SaveAccountButton" Content="Save account" Style="{StaticResource AccentButtonStyle}" Click="SaveAccountButton_Click" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="General" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,12,0,0" />
+                <NumberBox x:Name="IntervalBox" Header="Refresh interval (seconds)" Minimum="30" Maximum="3600"
+                           SmallChange="10" LargeChange="60" SpinButtonPlacementMode="Inline" HorizontalAlignment="Left" Width="240" />
+                <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           Text="Each refresh costs two requests per organization against Forge's 60 per minute, shared with your browser. While a deploy runs, the app looks every 15 seconds." />
+                <ToggleSwitch x:Name="NotifySwitch" Header="Notify when a deployment finishes or fails" />
+                <ToggleSwitch x:Name="StartupSwitch" Header="Start with Windows (in the tray, without opening the panel)" />
+                <TextBox x:Name="TemplateBox" Header="Dashboard address template" FontFamily="{StaticResource MonoFont}" />
+                <TextBlock x:Name="TemplateHelp" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button x:Name="SaveSettingsButton" Content="Save settings" Style="{StaticResource AccentButtonStyle}" Click="SaveSettingsButton_Click" />
+                    <TextBlock x:Name="SettingsSaved" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+
+                <TextBlock Text="Files" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,12,0,0" />
+                <TextBlock x:Name="PathsText" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontFamily="{StaticResource MonoFont}" FontSize="12" />
+                <Button Content="Open the folder" Click="OpenFolder_Click" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>

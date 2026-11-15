@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Forge.App.Views.PanelWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Forge.App.Views"
+    Title="Forge">
+
+    <Grid x:Name="Root" PreviewKeyDown="Root_PreviewKeyDown">
+        <Grid.Resources>
+            <DataTemplate x:Key="RowTemplate" x:DataType="local:RowItem">
+                <Grid Padding="{x:Bind Indent}" ColumnSpacing="10" MinHeight="38" Opacity="{x:Bind RowOpacity}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="14" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Ellipse Width="9" Height="9" VerticalAlignment="Center" StrokeThickness="2"
+                             Fill="{x:Bind DotFill}" Stroke="{x:Bind DotStroke}" Visibility="{x:Bind DotVisibility}" />
+                    <FontIcon Grid.Column="1" FontFamily="{StaticResource IconFont}" FontSize="10" Glyph="{x:Bind Chevron}"
+                              Visibility="{x:Bind ChevronVisibility}" Opacity="{x:Bind ChevronOpacity}" Width="12"
+                              Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                        <TextBlock Text="{x:Bind Title}" FontWeight="{x:Bind TitleWeight}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{x:Bind Detail}" Visibility="{x:Bind DetailVisibility}" TextTrimming="CharacterEllipsis"
+                                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <TextBlock Text="{x:Bind StatusText}" Foreground="{x:Bind StatusBrush}" HorizontalAlignment="Right"
+                                   Style="{StaticResource CaptionTextBlockStyle}" MaxWidth="190" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{x:Bind Time}" Visibility="{x:Bind TimeVisibility}" HorizontalAlignment="Right"
+                                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+                    <Button Grid.Column="4" Visibility="{x:Bind CogVisibility}" Click="Cog_Click" Tag="{x:Bind Key}"
+                            Padding="6" Background="Transparent" BorderThickness="0" IsTabStop="False"
+                            ToolTipService.ToolTip="Server actions">
+                        <FontIcon FontFamily="{StaticResource IconFont}" FontSize="12" Glyph="&#xE713;"
+                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </Button>
+                </Grid>
+            </DataTemplate>
+        </Grid.Resources>
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Hero: what this view is about, and how it is. -->
+        <Grid Grid.Row="0" Padding="16,14,8,6" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Ellipse x:Name="HeroDot" Width="11" Height="11" StrokeThickness="2" VerticalAlignment="Top" Margin="0,6,0,0" />
+            <StackPanel Grid.Column="1">
+                <TextBlock x:Name="CrumbText" Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="TitleText" Style="{StaticResource SubtitleTextBlockStyle}" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="SubtitleText" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" MaxLines="3"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+            <Button Grid.Column="2" x:Name="RefreshButton" Click="RefreshButton_Click" Background="Transparent" BorderThickness="0"
+                    VerticalAlignment="Top" IsTabStop="False" ToolTipService.ToolTip="Refresh (r)">
+                <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE72C;" />
+            </Button>
+            <Button Grid.Column="3" x:Name="SettingsButton" Click="SettingsButton_Click" Background="Transparent" BorderThickness="0"
+                    VerticalAlignment="Top" IsTabStop="False" ToolTipService.ToolTip="Settings (,)">
+                <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE713;" />
+            </Button>
+        </Grid>
+
+        <!-- The selected site's details, or an organization's note. -->
+        <StackPanel Grid.Row="1" x:Name="DetailPanel" Padding="16,0,16,6" Spacing="1" />
+
+        <Grid Grid.Row="2">
+            <ListView x:Name="RowList" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="RowList_ItemClick"
+                      RightTapped="RowList_RightTapped" ItemTemplate="{StaticResource RowTemplate}" Padding="0,0,0,6"
+                      TabNavigation="Once">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="36" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+            </ListView>
+
+            <Grid x:Name="PanePanel" Visibility="Collapsed" Padding="14,0,10,6" RowSpacing="6">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="PaneHeader" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" />
+                <ScrollViewer Grid.Row="1" x:Name="PaneScroll" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Auto"
+                              VerticalScrollBarVisibility="Auto" IsTabStop="True">
+                    <TextBlock x:Name="PaneText" FontFamily="{StaticResource MonoFont}" FontSize="12" IsTextSelectionEnabled="True"
+                               TextWrapping="NoWrap" Padding="6,4,12,12" />
+                </ScrollViewer>
+            </Grid>
+
+            <StackPanel x:Name="CommandPanel" Visibility="Collapsed" Padding="16,4,16,8" Spacing="8">
+                <TextBlock Text="Runs as the site's user, in the site's directory." TextWrapping="Wrap"
+                           Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBox x:Name="CommandBox" FontFamily="{StaticResource MonoFont}" PlaceholderText="php artisan about"
+                         IsSpellCheckEnabled="False" AcceptsReturn="False" />
+                <TextBlock x:Name="CommandState" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
+            </StackPanel>
+        </Grid>
+
+        <Border Grid.Row="3" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" Padding="16,8,16,10">
+            <StackPanel Spacing="2">
+                <TextBlock x:Name="FlashText" TextWrapping="Wrap" Visibility="Collapsed" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBlock x:Name="HintText" Style="{StaticResource CaptionTextBlockStyle}" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

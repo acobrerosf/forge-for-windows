@@ -1,0 +1,8 @@
+{
+  "data": [
+    { "id": 101, "type": "servers", "attributes": { "name": "app-1", "slug": "pale-wave", "type": "app", "provider": "hetzner", "region": "fsn1", "ip_address": "203.0.113.10", "ssh_port": 22, "php_version": "php84", "database_type": "mariadb1011", "is_ready": true, "revoked": false, "connection_status": "successful" } },
+    { "id": 102, "type": "servers", "attributes": { "name": "lb-1", "slug": "quiet-river", "type": "loadbalancer", "ip_address": "203.0.113.11", "ssh_port": 2222, "is_ready": true, "connection_status": "failed" } },
+    { "id": 103, "type": "servers", "attributes": { "name": "new-box", "type": "web", "is_ready": false } }
+  ],
+  "meta": { "next_cursor": null }
+}
