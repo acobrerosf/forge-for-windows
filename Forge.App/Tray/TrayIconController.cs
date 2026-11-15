@@ -73,12 +73,16 @@ internal sealed class TrayIconController : IDisposable
 
     public void Update(ForgeSnapshot snapshot)
     {
+        // The service reports several times a refresh, mostly with nothing new. Each write to the
+        // tray icon is a call to the shell, which can redraw it, so only what changed is sent.
         // Settings can change the same switch; keep the menu's tick in step with it.
-        _notifyItem.IsChecked = _notifying();
+        var notifying = _notifying();
+        if (_notifyItem.IsChecked != notifying) _notifyItem.IsChecked = notifying;
         var badge = snapshot.NeedsSetup ? Badge.Warn : Status.BadgeFor(snapshot.Health);
         var tip = snapshot.Summary;
         // The shell truncates tray tooltips at 127 characters.
-        _icon.ToolTipText = tip.Length > 120 ? tip[..119] + "…" : tip;
+        tip = tip.Length > 120 ? tip[..119] + "…" : tip;
+        if (_icon.ToolTipText != tip) _icon.ToolTipText = tip;
         if (badge == _badge) return;
         _badge = badge;
         _lit = true;

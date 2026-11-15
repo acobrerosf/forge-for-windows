@@ -46,6 +46,10 @@ public sealed partial class ForgeWindow : Window
     private bool _closed;
     private bool _choseOnce;
     private RunWatch? _commandWatch;
+    private readonly System.Collections.ObjectModel.ObservableCollection<ListEntry> _navItems = [];
+    // What the facts card and the service cards last drew, so a report with nothing new leaves them alone.
+    private string _factsShown = "";
+    private string _servicesShown = "";
 
     public ForgeWindow(ForgeService service, Action openSettings)
     {
@@ -105,6 +109,7 @@ public sealed partial class ForgeWindow : Window
         _syncing = true;
         SiteTabs.SelectedItem = SiteTabs.Items[0];
         ServerTabs.SelectedItem = ServerTabs.Items[0];
+        NavList.ItemsSource = _navItems;
         _syncing = false;
         Render();
     }
@@ -232,15 +237,18 @@ public sealed partial class ForgeWindow : Window
         _syncing = true;
         try
         {
-            NavList.ItemsSource = entries;
+            ListSync.Apply(_navItems, entries, e => e.Key, Looks);
             var current = _siteKey != "" ? SiteEntryKey(_org, _siteKey) : _serverId != "" ? ServerEntryKey(_org, _serverId) : "";
-            NavList.SelectedItem = entries.FirstOrDefault(e => e.Key == current);
+            var selected = _navItems.FirstOrDefault(e => e.Key == current);
+            if (NavList.SelectedItem != selected) NavList.SelectedItem = selected;
         }
         finally
         {
             _syncing = false;
         }
     }
+
+    private static string Looks(ListEntry e) => $"{e.Kind}|{e.Title}|{e.Detail}|{e.Status}|{e.Time}|{e.Tone}";
 
     private void SyncOrgBar(ForgeSnapshot snap)
     {
@@ -359,7 +367,9 @@ public sealed partial class ForgeWindow : Window
             SiteInfo.Severity = InfoBarSeverity.Informational;
             SiteInfo.Title = "Deploying";
             SiteInfo.Message = "Checking every 15 seconds. The deployment log follows along while it is open.";
-            SiteInfo.Content = new ProgressBar { IsIndeterminate = true, Margin = new Thickness(0, 0, 0, 12) };
+            // A new bar each report would restart its animation; keep the one that is running.
+            if (SiteInfo.Content is not ProgressBar)
+                SiteInfo.Content = new ProgressBar { IsIndeterminate = true, Margin = new Thickness(0, 0, 0, 12) };
             SiteInfoLink.Content = "Follow the log";
             SiteInfo.IsOpen = true;
         }
@@ -410,6 +420,9 @@ public sealed partial class ForgeWindow : Window
 
     private void SetFacts(IReadOnlyList<(string Label, string Value)> facts)
     {
+        var looks = string.Join("\n", facts.Select(f => f.Label + "=" + f.Value));
+        if (looks == _factsShown) return;
+        _factsShown = looks;
         FactsGrid.Children.Clear();
         FactsGrid.RowDefinitions.Clear();
         for (var i = 0; i < facts.Count; i++)
@@ -560,8 +573,11 @@ public sealed partial class ForgeWindow : Window
     /// <summary>One card per write the server type allows: what it does, why not when it can't, and its button.</summary>
     private void RenderServices(Server server)
     {
-        ServiceCards.Children.Clear();
         var writes = Actions.ServerActions(_org, server).Where(a => a.Armable).ToList();
+        var looks = $"{_org}|{server.Id}|{server.Name}|{_sending}|" + string.Join("\n", writes.Select(a => $"{a.Id}|{a.Label}|{a.Available}|{a.Reason}|{a.ArmIntent}"));
+        if (looks == _servicesShown) return;
+        _servicesShown = looks;
+        ServiceCards.Children.Clear();
         void Heading(string text) => ServiceCards.Children.Add(new TextBlock
         {
             Text = text,

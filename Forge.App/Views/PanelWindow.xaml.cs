@@ -40,6 +40,8 @@ public sealed partial class PanelWindow : Window
     private readonly DispatcherQueueTimer _clock;
 
     private List<RowItem> _rows = [];
+    private readonly System.Collections.ObjectModel.ObservableCollection<RowItem> _shownRows = [];
+    private string _factsShown = "";
     private int _cursor;
     private string? _preferKey;
 
@@ -79,6 +81,7 @@ public sealed partial class PanelWindow : Window
         _clock.Start();
 
         CommandBox.TextChanged += (_, _) => { if (Top is NavCommand) RenderCommand(); };
+        RowList.ItemsSource = _shownRows;
         BuildKeysHelp();
         ConfigureWindow();
     }
@@ -337,14 +340,16 @@ public sealed partial class PanelWindow : Window
     {
         var key = _preferKey ?? CursorRow?.Key;
         _preferKey = null;
+        // _rows holds this report's rows (fresh payloads); the list on screen keeps a row's old object
+        // while it looks the same, so anything read back from the list is matched to _rows by key.
         _rows = rows;
-        RowList.ItemsSource = rows;
+        ListSync.Apply(_shownRows, rows, r => r.Key, RowLooks);
         var index = key is null ? -1 : rows.FindIndex(r => r.Key == key);
         _cursor = index >= 0 ? index : Math.Clamp(_cursor, 0, Math.Max(0, rows.Count - 1));
         if (rows.Count == 0) return;
         _cursor = NearestSelectable(_cursor, 1);
-        RowList.SelectedIndex = _cursor;
-        RowList.ScrollIntoView(rows[_cursor]);
+        if (RowList.SelectedIndex != _cursor) RowList.SelectedIndex = _cursor;
+        RowList.ScrollIntoView(_shownRows[_cursor]);
         // A refresh while someone is typing a search must not take the keyboard away from them.
         if (_visible && Top is not (NavPane or NavCommand) && !IsInside(SearchBox))
             DispatcherQueue.TryEnqueue(() => { if (!IsInside(SearchBox)) RowList.Focus(FocusState.Programmatic); });
@@ -371,9 +376,15 @@ public sealed partial class PanelWindow : Window
 
     private static string Capitalize(string s) => s.Length < 2 ? s.ToUpperInvariant() : char.ToUpperInvariant(s[0]) + s[1..];
 
+    private static string RowLooks(RowItem r) =>
+        $"{r.Kind}|{r.Title}|{r.Detail}|{r.StatusText}|{r.Time}|{r.Tone}|{r.Enabled}|{r.Expanded}|{r.Glyph}|{r.Armed}|{r.Busy}|{r.Depth}";
+
     /// <summary>A site's facts as a two-column grid of caption over value.</summary>
     private void SetFacts(IReadOnlyList<(string Label, string Value)> facts)
     {
+        var looks = string.Join("\n", facts.Select(f => f.Label + "=" + f.Value));
+        if (looks == _factsShown) return;
+        _factsShown = looks;
         FactsGrid.Children.Clear();
         FactsGrid.RowDefinitions.Clear();
         FactsCard.Visibility = facts.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
@@ -707,7 +718,9 @@ public sealed partial class PanelWindow : Window
             SiteInfo.Severity = InfoBarSeverity.Informational;
             SiteInfo.Title = "Deploying";
             SiteInfo.Message = "Checking every 15 seconds";
-            SiteInfo.Content = new ProgressBar { IsIndeterminate = true, Margin = new Thickness(0, 0, 0, 10) };
+            // A new bar each report would restart its animation; keep the one that is running.
+            if (SiteInfo.Content is not ProgressBar)
+                SiteInfo.Content = new ProgressBar { IsIndeterminate = true, Margin = new Thickness(0, 0, 0, 10) };
             SiteInfoLink.Content = "Follow log";
             SiteInfo.IsOpen = true;
         }
@@ -902,7 +915,7 @@ public sealed partial class PanelWindow : Window
         if (_rows.Count == 0) return;
         _cursor = NearestSelectable(Math.Clamp(index, 0, _rows.Count - 1), 1);
         RowList.SelectedIndex = _cursor;
-        RowList.ScrollIntoView(_rows[_cursor]);
+        RowList.ScrollIntoView(_shownRows[_cursor]);
     }
 
     private void Activate(RowItem row)
@@ -1567,9 +1580,11 @@ public sealed partial class PanelWindow : Window
 
     private void RowList_ItemClick(object sender, ItemClickEventArgs e)
     {
-        if (e.ClickedItem is not RowItem { Selectable: true } row) return;
-        _cursor = _rows.IndexOf(row);
-        Activate(row);
+        if (e.ClickedItem is not RowItem { Selectable: true } clicked) return;
+        var index = _rows.FindIndex(r => r.Key == clicked.Key);
+        if (index < 0) return;
+        _cursor = index;
+        Activate(_rows[index]);
     }
 
     /// <summary>Section titles can't be clicked, hovered or tabbed to.</summary>
@@ -1584,8 +1599,8 @@ public sealed partial class PanelWindow : Window
     private void RowList_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
         if (e.OriginalSource is not FrameworkElement { DataContext: RowItem row } source) return;
-        if (!SelectRow(row.Key)) return;
-        if (MenuFor(row) is not { } menu) return;
+        if (!SelectRow(row.Key) || CursorRow is not { } current) return;
+        if (MenuFor(current) is not { } menu) return;
         e.Handled = true;
         menu.ShowAt(source, new FlyoutShowOptions { Position = e.GetPosition(source) });
     }
