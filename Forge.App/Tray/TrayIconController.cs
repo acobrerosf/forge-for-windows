@@ -27,14 +27,10 @@ internal sealed class TrayIconController : IDisposable
         Func<bool> notifying, Action<bool> setNotifying)
     {
         _notifying = notifying;
-        // The Windows tray convention: the default action first and in bold, then quick switches, then Quit last.
+        // The Windows tray convention: the default action first, then quick switches, then Quit last.
+        // (The menu is drawn natively, which ignores font weight, so the default item can't be bold.)
         var menu = new MenuFlyout();
-        menu.Items.Add(new MenuFlyoutItem
-        {
-            Text = "Open Forge",
-            FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-            Command = new RelayCommand(toggle),
-        });
+        menu.Items.Add(new MenuFlyoutItem { Text = "Open Forge", Command = new RelayCommand(toggle) });
         menu.Items.Add(new MenuFlyoutItem { Text = "Refresh now", Command = new RelayCommand(refresh) });
         menu.Items.Add(new MenuFlyoutSeparator());
         _notifyItem = new ToggleMenuFlyoutItem
