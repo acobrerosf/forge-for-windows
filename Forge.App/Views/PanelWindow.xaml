@@ -8,37 +8,84 @@
 
     <Grid x:Name="Root" PreviewKeyDown="Root_PreviewKeyDown">
         <Grid.Resources>
+            <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Width" Value="32" />
+                <Setter Property="Height" Value="32" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="IsTabStop" Value="False" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="CardBorder" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="6" />
+            </Style>
+
             <DataTemplate x:Key="RowTemplate" x:DataType="local:RowItem">
-                <Grid Padding="{x:Bind Indent}" ColumnSpacing="10" MinHeight="38" Opacity="{x:Bind RowOpacity}">
+                <Grid MinHeight="{x:Bind RowHeight}" Padding="{x:Bind Indent}" ColumnSpacing="10" Opacity="{x:Bind RowOpacity}"
+                      Background="Transparent" PointerEntered="Row_PointerEntered" PointerExited="Row_PointerExited">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="14" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="16" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <Ellipse Width="9" Height="9" VerticalAlignment="Center" StrokeThickness="2"
-                             Fill="{x:Bind DotFill}" Stroke="{x:Bind DotStroke}" Visibility="{x:Bind DotVisibility}" />
-                    <FontIcon Grid.Column="1" FontFamily="{StaticResource IconFont}" FontSize="10" Glyph="{x:Bind Chevron}"
-                              Visibility="{x:Bind ChevronVisibility}" Opacity="{x:Bind ChevronOpacity}" Width="12"
+
+                    <!-- A section title in an action list: drawn alone, never selected. -->
+                    <TextBlock Grid.ColumnSpan="5" Text="{x:Bind Title}" Visibility="{x:Bind HeaderVisibility}" VerticalAlignment="Bottom"
+                               Margin="2,0,0,2" Style="{StaticResource BodyStrongTextBlockStyle}" />
+
+                    <FontIcon FontFamily="{StaticResource IconFont}" FontSize="10" Glyph="{x:Bind Chevron}" Width="12"
+                              Visibility="{x:Bind ChevronVisibility}" Opacity="{x:Bind ChevronOpacity}"
                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                    <Ellipse Grid.Column="1" Width="10" Height="10" VerticalAlignment="Center" HorizontalAlignment="Center" StrokeThickness="2"
+                             Fill="{x:Bind DotFill}" Stroke="{x:Bind DotStroke}" Visibility="{x:Bind DotVisibility}" />
+                    <FontIcon Grid.Column="1" FontFamily="{StaticResource IconFont}" FontSize="16" Glyph="{x:Bind Glyph}"
+                              Visibility="{x:Bind GlyphVisibility}" />
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Visibility="{x:Bind BodyVisibility}">
                         <TextBlock Text="{x:Bind Title}" FontWeight="{x:Bind TitleWeight}" TextTrimming="CharacterEllipsis" />
                         <TextBlock Text="{x:Bind Detail}" Visibility="{x:Bind DetailVisibility}" TextTrimming="CharacterEllipsis"
+                                   TextWrapping="NoWrap" MaxLines="1" ToolTipService.ToolTip="{x:Bind Detail}"
                                    Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
-                    <StackPanel Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Right">
-                        <TextBlock Text="{x:Bind StatusText}" Foreground="{x:Bind StatusBrush}" HorizontalAlignment="Right"
-                                   Style="{StaticResource CaptionTextBlockStyle}" MaxWidth="190" TextTrimming="CharacterEllipsis" />
+                    <StackPanel Grid.Column="3" x:Name="Trailing" VerticalAlignment="Center" HorizontalAlignment="Right" Visibility="{x:Bind BodyVisibility}">
+                        <TextBlock Text="{x:Bind StatusText}" Foreground="{x:Bind StatusBrush}" FontWeight="{x:Bind StatusWeight}" HorizontalAlignment="Right"
+                                   Style="{StaticResource CaptionTextBlockStyle}" MaxWidth="150" TextTrimming="CharacterEllipsis" />
                         <TextBlock Text="{x:Bind Time}" Visibility="{x:Bind TimeVisibility}" HorizontalAlignment="Right"
-                                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
-                    <Button Grid.Column="4" Visibility="{x:Bind CogVisibility}" Click="Cog_Click" Tag="{x:Bind Key}"
-                            Padding="6" Background="Transparent" BorderThickness="0" IsTabStop="False"
-                            ToolTipService.ToolTip="Server actions">
-                        <FontIcon FontFamily="{StaticResource IconFont}" FontSize="12" Glyph="&#xE713;"
-                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                    </Button>
+
+                    <!-- Shown while the pointer is over a site or server row. -->
+                    <StackPanel Grid.Column="4" x:Name="QuickActions" Orientation="Horizontal" Spacing="2" Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Spacing="2" Visibility="{x:Bind SiteActionsVisibility}">
+                            <Button Style="{StaticResource IconButton}" Tag="{x:Bind Key}" Click="QuickDeploy_Click"
+                                    ToolTipService.ToolTip="Deploy (D)" AutomationProperties.Name="Deploy">
+                                <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE898;" />
+                            </Button>
+                            <Button Style="{StaticResource IconButton}" Tag="{x:Bind Key}" Click="QuickOpen_Click"
+                                    ToolTipService.ToolTip="Open site (O)" AutomationProperties.Name="Open site">
+                                <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE8A7;" />
+                            </Button>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="2" Visibility="{x:Bind ServerActionsVisibility}">
+                            <Button Style="{StaticResource IconButton}" Tag="{x:Bind Key}" Click="QuickEvents_Click"
+                                    ToolTipService.ToolTip="Server events (E)" AutomationProperties.Name="Server events">
+                                <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE81C;" />
+                            </Button>
+                            <Button Style="{StaticResource IconButton}" Tag="{x:Bind Key}" Click="QuickTerminal_Click"
+                                    ToolTipService.ToolTip="Open ssh in Windows Terminal (T)" AutomationProperties.Name="Open ssh in Windows Terminal">
+                                <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE756;" />
+                            </Button>
+                        </StackPanel>
+                        <Button Style="{StaticResource IconButton}" Tag="{x:Bind Key}" Click="QuickMore_Click"
+                                ToolTipService.ToolTip="More actions" AutomationProperties.Name="More actions">
+                            <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE712;" />
+                        </Button>
+                    </StackPanel>
                 </Grid>
             </DataTemplate>
         </Grid.Resources>
@@ -46,79 +93,205 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Hero: what this view is about, and how it is. -->
-        <Grid Grid.Row="0" Padding="16,14,8,6" ColumnSpacing="10">
+        <!-- Header: back, what this view is about and how it is, refresh. -->
+        <Grid Grid.Row="0" Padding="8,8,8,6" ColumnSpacing="6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Ellipse x:Name="HeroDot" Width="11" Height="11" StrokeThickness="2" VerticalAlignment="Top" Margin="0,6,0,0" />
-            <StackPanel Grid.Column="1">
-                <TextBlock x:Name="CrumbText" Style="{StaticResource CaptionTextBlockStyle}"
-                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="TitleText" Style="{StaticResource SubtitleTextBlockStyle}" TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="SubtitleText" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" MaxLines="3"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
-            <Button Grid.Column="2" x:Name="RefreshButton" Click="RefreshButton_Click" Background="Transparent" BorderThickness="0"
-                    VerticalAlignment="Top" IsTabStop="False" ToolTipService.ToolTip="Refresh (r)">
-                <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE72C;" />
+            <Button x:Name="BackButton" Style="{StaticResource IconButton}" VerticalAlignment="Top" Click="BackButton_Click"
+                    ToolTipService.ToolTip="Back (Backspace)" AutomationProperties.Name="Back" Visibility="Collapsed">
+                <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE72B;" />
             </Button>
-            <Button Grid.Column="3" x:Name="SettingsButton" Click="SettingsButton_Click" Background="Transparent" BorderThickness="0"
-                    VerticalAlignment="Top" IsTabStop="False" ToolTipService.ToolTip="Settings (,)">
-                <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE713;" />
+            <StackPanel Grid.Column="1" x:Name="TitleBlock" Padding="8,0,0,0" VerticalAlignment="Center">
+                <TextBlock x:Name="CrumbText" Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="TitleText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                <StackPanel x:Name="SubtitleLine" Orientation="Horizontal" Spacing="6" Margin="0,2,0,0">
+                    <Ellipse x:Name="HeroDot" Width="10" Height="10" StrokeThickness="2" VerticalAlignment="Center" />
+                    <TextBlock x:Name="SubtitleText" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" MaxLines="2"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" MaxWidth="280" />
+                </StackPanel>
+            </StackPanel>
+            <Button Grid.Column="2" x:Name="RefreshButton" Style="{StaticResource IconButton}" VerticalAlignment="Top" Click="RefreshButton_Click"
+                    ToolTipService.ToolTip="Refresh (R)" AutomationProperties.Name="Refresh">
+                <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE72C;" />
             </Button>
         </Grid>
 
-        <!-- The selected site's details, or an organization's note. -->
-        <StackPanel Grid.Row="1" x:Name="DetailPanel" Padding="16,0,16,6" Spacing="1" />
+        <!-- The tree's tools: search, organizations, what needs looking at. -->
+        <StackPanel Grid.Row="1" x:Name="TreeTools" Spacing="6" Padding="12,0,12,8"
+                    BorderThickness="0,0,0,1" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
+            <AutoSuggestBox x:Name="SearchBox" PlaceholderText="Search servers and sites" QueryIcon="Find"
+                            TextChanged="SearchBox_TextChanged" AutomationProperties.Name="Search servers and sites"
+                            ToolTipService.ToolTip="Search (Ctrl+F)" />
+            <!-- Long organization names scroll sideways rather than being cut off. -->
+            <ScrollViewer x:Name="OrgScroll" HorizontalScrollBarVisibility="Hidden" HorizontalScrollMode="Enabled"
+                          VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled" Margin="-4,0,-12,0" IsTabStop="False">
+                <SelectorBar x:Name="OrgBar" SelectionChanged="OrgBar_SelectionChanged" />
+            </ScrollViewer>
+            <StackPanel x:Name="ChipPanel" Orientation="Horizontal" Spacing="6" />
+        </StackPanel>
 
-        <Grid Grid.Row="2">
+        <!-- A site's or server's page: the main actions and what it is. -->
+        <StackPanel Grid.Row="2" x:Name="DetailPanel" Padding="16,2,16,8" Spacing="10">
+            <Grid x:Name="SiteButtons" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Button x:Name="DeployButton" Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Stretch" IsTabStop="False"
+                        Click="DeployButton_Click" ToolTipService.ToolTip="Deploy (D)">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE898;" />
+                        <TextBlock x:Name="DeployButtonText" Text="Deploy" />
+                    </StackPanel>
+                </Button>
+                <Button Grid.Column="1" x:Name="OpenSiteButton" HorizontalAlignment="Stretch" IsTabStop="False"
+                        Click="OpenSiteButton_Click" ToolTipService.ToolTip="Open site (O)">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE8A7;" />
+                        <TextBlock Text="Open site" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+            <InfoBar x:Name="SiteInfo" IsOpen="False" IsClosable="False" Padding="0">
+                <InfoBar.ActionButton>
+                    <HyperlinkButton x:Name="SiteInfoLink" Content="View log" Click="SiteInfoLink_Click" IsTabStop="False" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+            <Border x:Name="FactsCard" Style="{StaticResource CardBorder}" Padding="12,10">
+                <Grid x:Name="FactsGrid" ColumnSpacing="16" RowSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                </Grid>
+            </Border>
+            <Border x:Name="MaintenanceCard" Style="{StaticResource CardBorder}" Padding="12,4,8,4">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon FontFamily="{StaticResource IconFont}" FontSize="16" Glyph="&#xE90F;" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Maintenance mode" />
+                        <TextBlock x:Name="MaintenanceText" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="2" x:Name="MaintenanceSwitch" OnContent="On" OffContent="Off" MinWidth="0"
+                                  IsTabStop="False" Toggled="MaintenanceSwitch_Toggled" AutomationProperties.Name="Maintenance mode"
+                                  ToolTipService.ToolTip="Maintenance mode (M)" />
+                </Grid>
+            </Border>
+        </StackPanel>
+
+        <Grid Grid.Row="3">
             <ListView x:Name="RowList" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="RowList_ItemClick"
-                      RightTapped="RowList_RightTapped" ItemTemplate="{StaticResource RowTemplate}" Padding="0,0,0,6"
-                      TabNavigation="Once">
+                      RightTapped="RowList_RightTapped" ContainerContentChanging="RowList_ContainerContentChanging"
+                      ItemTemplate="{StaticResource RowTemplate}" Padding="0,4,0,8" TabNavigation="Once">
                 <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
                         <Setter Property="Padding" Value="0" />
-                        <Setter Property="MinHeight" Value="36" />
+                        <Setter Property="MinHeight" Value="0" />
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                     </Style>
                 </ListView.ItemContainerStyle>
             </ListView>
 
-            <Grid x:Name="PanePanel" Visibility="Collapsed" Padding="14,0,10,6" RowSpacing="6">
+            <Grid x:Name="PanePanel" Visibility="Collapsed" Padding="12,0,12,8" RowSpacing="8">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <TextBlock x:Name="PaneHeader" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" />
-                <ScrollViewer Grid.Row="1" x:Name="PaneScroll" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Auto"
-                              VerticalScrollBarVisibility="Auto" IsTabStop="True">
-                    <TextBlock x:Name="PaneText" FontFamily="{StaticResource MonoFont}" FontSize="12" IsTextSelectionEnabled="True"
-                               TextWrapping="NoWrap" Padding="6,4,12,12" />
-                </ScrollViewer>
+                <Grid ColumnSpacing="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="PaneHeader" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="4,0,0,0" />
+                    <Button Grid.Column="1" Style="{StaticResource IconButton}" Click="PaneReload_Click"
+                            ToolTipService.ToolTip="Reload (R)" AutomationProperties.Name="Reload">
+                        <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE72C;" />
+                    </Button>
+                    <Button Grid.Column="2" Style="{StaticResource IconButton}" Click="PaneCopy_Click"
+                            ToolTipService.ToolTip="Copy (C)" AutomationProperties.Name="Copy">
+                        <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE8C8;" />
+                    </Button>
+                    <Button Grid.Column="3" Style="{StaticResource IconButton}" Click="PaneSave_Click"
+                            ToolTipService.ToolTip="Save to Downloads (W)" AutomationProperties.Name="Save to Downloads">
+                        <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE896;" />
+                    </Button>
+                </Grid>
+                <Border Grid.Row="1" Style="{StaticResource CardBorder}">
+                    <ScrollViewer x:Name="PaneScroll" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Auto"
+                                  VerticalScrollBarVisibility="Auto" IsTabStop="True">
+                        <TextBlock x:Name="PaneText" FontFamily="{StaticResource MonoFont}" FontSize="12" IsTextSelectionEnabled="True"
+                                   TextWrapping="NoWrap" Padding="10,8,12,12" />
+                    </ScrollViewer>
+                </Border>
             </Grid>
 
             <StackPanel x:Name="CommandPanel" Visibility="Collapsed" Padding="16,4,16,8" Spacing="8">
                 <TextBlock Text="Runs as the site's user, in the site's directory." TextWrapping="Wrap"
                            Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBox x:Name="CommandBox" FontFamily="{StaticResource MonoFont}" PlaceholderText="php artisan about"
-                         IsSpellCheckEnabled="False" AcceptsReturn="False" />
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="CommandBox" FontFamily="{StaticResource MonoFont}" PlaceholderText="php artisan about"
+                             IsSpellCheckEnabled="False" AcceptsReturn="False" AutomationProperties.Name="Command" />
+                    <Button Grid.Column="1" x:Name="RunButton" Content="Run" Style="{StaticResource AccentButtonStyle}" IsTabStop="False"
+                            Click="RunButton_Click" ToolTipService.ToolTip="Run (Enter)" />
+                </Grid>
                 <TextBlock x:Name="CommandState" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" />
             </StackPanel>
         </Grid>
 
-        <Border Grid.Row="3" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" Padding="16,8,16,10">
-            <StackPanel Spacing="2">
-                <TextBlock x:Name="FlashText" TextWrapping="Wrap" Visibility="Collapsed" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <TextBlock x:Name="HintText" Style="{StaticResource CaptionTextBlockStyle}" TextTrimming="CharacterEllipsis"
-                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+        <!-- Footer: what just happened, how fresh this is, help and settings. -->
+        <Border Grid.Row="4" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                Background="{ThemeResource LayerOnAcrylicFillColorDefaultBrush}" Padding="16,4,8,4">
+            <StackPanel>
+                <TextBlock x:Name="FlashText" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,4,8,2"
+                           Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <Grid ColumnSpacing="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="UpdatedText" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Button Grid.Column="1" x:Name="KeysButton" Style="{StaticResource IconButton}"
+                            ToolTipService.ToolTip="Keyboard shortcuts (?)" AutomationProperties.Name="Keyboard shortcuts">
+                        <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE765;" />
+                        <Button.Flyout>
+                            <Flyout x:Name="KeysFlyout" Placement="TopEdgeAlignedRight">
+                                <Grid x:Name="KeysGrid" ColumnSpacing="16" RowSpacing="4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                </Grid>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                    <Button Grid.Column="2" x:Name="SettingsButton" Style="{StaticResource IconButton}" Click="SettingsButton_Click"
+                            ToolTipService.ToolTip="Settings (,)" AutomationProperties.Name="Settings">
+                        <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE713;" />
+                    </Button>
+                </Grid>
             </StackPanel>
         </Border>
     </Grid>

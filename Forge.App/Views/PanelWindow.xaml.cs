@@ -8,6 +8,7 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
@@ -21,19 +22,18 @@ namespace Forge.App.Views;
 /// <summary>
 /// The flyout above the tray. One surface, one cursor: the tree, a server's
 /// or site's actions, a feed, a log — all are a different set of rows or a
-/// pane pushed over the tree. Every write arms on its first press and is
-/// sent by a capital Y, and by nothing else.
+/// pane pushed over the tree. Every write arms first and asks in a dialog;
+/// only its button, or a capital Y, sends it.
 /// </summary>
 public sealed partial class PanelWindow : Window
 {
-    private const int WidthDip = 460;
-    private const int HeightDip = 680;
+    private const int WidthDip = 380;
+    private const int HeightDip = 640;
 
     private readonly ForgeService _service;
     private readonly Action _openSettings;
     private readonly List<Nav> _nav = [new NavTree()];
     private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
-    private readonly DispatcherQueueTimer _armTimer;
     private readonly DispatcherQueueTimer _flashTimer;
     private readonly DispatcherQueueTimer _clock;
 
@@ -46,6 +46,13 @@ public sealed partial class PanelWindow : Window
     private Func<bool>? _armedValid;
     private Func<Task>? _armedSend;
     private string _busyKey = "";
+    private ContentDialog? _confirmDialog;
+
+    /// <summary>The tree's search text and organization filter ("" = every organization).</summary>
+    private string _query = "";
+    private string _orgFilter = "";
+    private bool _syncingOrgBar;
+    private bool _syncingSwitch;
 
     private bool _visible;
     private bool _closing;
@@ -59,17 +66,6 @@ public sealed partial class PanelWindow : Window
         InitializeComponent();
 
         var queue = DispatcherQueue;
-        _armTimer = queue.CreateTimer();
-        _armTimer.Interval = TimeSpan.FromSeconds(8);
-        _armTimer.IsRepeating = false;
-        // Expiry drops the arm but never takes the keyboard back: the next key is overwhelmingly Y.
-        _armTimer.Tick += (_, _) =>
-        {
-            if (_armedKey == "") return;
-            Disarm();
-            Flash("Not sent — the confirm timed out");
-            Render();
-        };
         _flashTimer = queue.CreateTimer();
         _flashTimer.Interval = TimeSpan.FromSeconds(6);
         _flashTimer.IsRepeating = false;
@@ -80,7 +76,45 @@ public sealed partial class PanelWindow : Window
         _clock.Start();
 
         CommandBox.TextChanged += (_, _) => { if (Top is NavCommand) RenderCommand(); };
+        BuildKeysHelp();
         ConfigureWindow();
+    }
+
+    private static readonly (string Keys, string Does)[] KeyHelp =
+    [
+        ("↑ ↓  j k", "Move"),
+        ("Enter", "Fold a server, open a site, choose an action"),
+        ("→  l", "A server's actions"),
+        ("←  h  Backspace", "Back"),
+        ("Esc", "Back, then close"),
+        ("Ctrl+F", "Search"),
+        ("d", "Deploy the current site"),
+        ("m", "Maintenance mode (on a site)"),
+        ("Shift+Y", "Confirm what a dialog asks"),
+        ("o  f", "Open site · open in Forge"),
+        ("s  t", "Copy ssh · ssh in Windows Terminal"),
+        ("e", "Server events"),
+        ("r", "Refresh, or reload the open log"),
+        ("c  w", "In a log: copy · save to Downloads"),
+        (",", "Settings"),
+    ];
+
+    private void BuildKeysHelp()
+    {
+        KeysGrid.Children.Add(new TextBlock { Text = "Keyboard shortcuts", Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"], Margin = new Thickness(0, 0, 0, 4) });
+        Grid.SetColumnSpan((FrameworkElement)KeysGrid.Children[0], 2);
+        KeysGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        for (var i = 0; i < KeyHelp.Length; i++)
+        {
+            KeysGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var keys = new TextBlock { Text = KeyHelp[i].Keys, FontFamily = (FontFamily)Application.Current.Resources["MonoFont"], FontSize = 12 };
+            var does = new TextBlock { Text = KeyHelp[i].Does, FontSize = 12, Foreground = Palette.Secondary, TextWrapping = TextWrapping.Wrap, MaxWidth = 220 };
+            Grid.SetRow(keys, i + 1);
+            Grid.SetRow(does, i + 1);
+            Grid.SetColumn(does, 1);
+            KeysGrid.Children.Add(keys);
+            KeysGrid.Children.Add(does);
+        }
     }
 
     private Nav Top => _nav[^1];
@@ -132,6 +166,8 @@ public sealed partial class PanelWindow : Window
         _visible = true;
         Render();
         FocusContent();
+        // Activation hands focus to the first tab stop, the search box; the keyboard belongs on the list.
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, FocusContent);
     }
 
     public void HidePanel()
@@ -193,7 +229,11 @@ public sealed partial class PanelWindow : Window
     private void Render()
     {
         var snap = _service.Snapshot;
-        DetailPanel.Children.Clear();
+        DetailPanel.Visibility = Visibility.Collapsed;
+        TreeTools.Visibility = Top is NavTree && !snap.NeedsSetup ? Visibility.Visible : Visibility.Collapsed;
+        BackButton.Visibility = _nav.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        TitleBlock.Padding = new Thickness(_nav.Count > 1 ? 0 : 8, 0, 0, 0);
+        UpdatedText.Text = UpdatedLine(snap);
         List<RowItem> rows;
         switch (Top)
         {
@@ -216,8 +256,16 @@ public sealed partial class PanelWindow : Window
         PanePanel.Visibility = Top is NavPane ? Visibility.Visible : Visibility.Collapsed;
         CommandPanel.Visibility = Top is NavCommand ? Visibility.Visible : Visibility.Collapsed;
         ApplyRows(rows);
-        HintText.Text = Hint();
         QueueSnapshot();
+    }
+
+    private static string UpdatedLine(ForgeSnapshot snap)
+    {
+        if (snap.NeedsSetup) return "Not set up yet";
+        if (snap.Orgs.Any(o => o.Refreshing)) return "Refreshing…";
+        var last = snap.Orgs.Count == 0 ? 0 : snap.Orgs.Max(o => o.LastRefreshMs);
+        var orgs = snap.Orgs.Count > 1 ? " · " + ForgeText.Pluralize(snap.Orgs.Count, "organization") : "";
+        return (last > 0 ? "Updated " + ForgeText.RelativeMs(last, NowMs) : "Loading…") + orgs;
     }
 
     // Screen capture APIs see a WinUI window as black, so a development build can
@@ -274,20 +322,26 @@ public sealed partial class PanelWindow : Window
         var index = key is null ? -1 : rows.FindIndex(r => r.Key == key);
         _cursor = index >= 0 ? index : Math.Clamp(_cursor, 0, Math.Max(0, rows.Count - 1));
         if (rows.Count == 0) return;
+        _cursor = NearestSelectable(_cursor, 1);
         RowList.SelectedIndex = _cursor;
         RowList.ScrollIntoView(rows[_cursor]);
-        if (_visible && Top is not (NavPane or NavCommand))
-            DispatcherQueue.TryEnqueue(() => RowList.Focus(FocusState.Programmatic));
+        // A refresh while someone is typing a search must not take the keyboard away from them.
+        if (_visible && Top is not (NavPane or NavCommand) && !IsInside(SearchBox))
+            DispatcherQueue.TryEnqueue(() => { if (!IsInside(SearchBox)) RowList.Focus(FocusState.Programmatic); });
     }
 
-    private void SetHero(string crumb, string title, string subtitle, Tone? tone)
+    /// <summary>The tree's header is just the app's name; a pushed view gets a large title with its state under it.</summary>
+    private void SetHero(string crumb, string title, string subtitle, Tone? tone, Brush? subtitleBrush = null)
     {
+        var tree = Top is NavTree;
         CrumbText.Text = crumb;
         CrumbText.Visibility = crumb == "" ? Visibility.Collapsed : Visibility.Visible;
         TitleText.Text = title;
+        TitleText.FontSize = tree ? 14 : 18;
         SubtitleText.Text = subtitle;
-        SubtitleText.Visibility = subtitle == "" ? Visibility.Collapsed : Visibility.Visible;
-        HeroDot.Visibility = tone is null ? Visibility.Collapsed : Visibility.Visible;
+        SubtitleText.Foreground = subtitleBrush ?? Palette.Secondary;
+        SubtitleLine.Visibility = subtitle == "" ? Visibility.Collapsed : Visibility.Visible;
+        HeroDot.Visibility = tone is null || tree ? Visibility.Collapsed : Visibility.Visible;
         if (tone is { } t)
         {
             HeroDot.Fill = t == Tone.Warn ? Palette.Transparent : Palette.For(t);
@@ -295,15 +349,68 @@ public sealed partial class PanelWindow : Window
         }
     }
 
-    private void AddDetail(string text, Brush? brush = null)
+    private static string Capitalize(string s) => s.Length < 2 ? s.ToUpperInvariant() : char.ToUpperInvariant(s[0]) + s[1..];
+
+    /// <summary>A site's facts as a two-column grid of caption over value.</summary>
+    private void SetFacts(IReadOnlyList<(string Label, string Value)> facts)
     {
-        DetailPanel.Children.Add(new TextBlock
+        FactsGrid.Children.Clear();
+        FactsGrid.RowDefinitions.Clear();
+        FactsCard.Visibility = facts.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        for (var i = 0; i < facts.Count; i++)
         {
-            Text = text,
-            TextWrapping = TextWrapping.Wrap,
-            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-            Foreground = brush ?? Palette.Secondary,
-        });
+            if (i % 2 == 0) FactsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var cell = new StackPanel();
+            cell.Children.Add(new TextBlock
+            {
+                Text = facts[i].Label,
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+                Foreground = Palette.Secondary,
+            });
+            cell.Children.Add(new TextBlock { Text = Capitalize(facts[i].Value), TextTrimming = TextTrimming.CharacterEllipsis });
+            ToolTipService.SetToolTip(cell, facts[i].Value);
+            Grid.SetRow(cell, i / 2);
+            Grid.SetColumn(cell, i % 2);
+            FactsGrid.Children.Add(cell);
+        }
+    }
+
+    private static readonly Dictionary<string, string> ActionGlyphs = new()
+    {
+        ["deploy"] = "", ["maintenance"] = "", ["site-php-reload"] = "", ["command"] = "",
+        ["log"] = "", ["heartbeats"] = "", ["open"] = "", ["forge"] = "", ["ssh"] = "",
+        ["ssh-terminal"] = "", ["nginx-restart"] = "", ["php-reload"] = "", ["php-restart"] = "",
+        ["supervisor-restart"] = "", ["redis-restart"] = "", ["database-restart"] = "",
+        ["reboot"] = "", ["events"] = "", ["recipes"] = "", ["monitors"] = "",
+    };
+
+    private static string GlyphFor(ActionSpec a) =>
+        ActionGlyphs.TryGetValue(a.Id, out var g) ? g : a.Log != "" ? "" : "";
+
+    /// <summary>Which titled section of a site's or server's page an action belongs in; "" leaves it off the list.</summary>
+    private static string SectionOf(ActionSpec a) => a.Id switch
+    {
+        // Drawn as the page's buttons and switch instead.
+        "deploy" or "open" or "maintenance" => "",
+        "log" => "Logs",
+        _ when a.Log != "" => "Logs",
+        "command" or "site-php-reload" or "heartbeats" => "Tools",
+        "forge" or "ssh" or "ssh-terminal" => "Connect",
+        "reboot" or "events" or "recipes" or "monitors" => "Server",
+        _ => "Services",
+    };
+
+    private List<RowItem> Sectioned(IEnumerable<RowItem> rows)
+    {
+        var list = new List<RowItem>();
+        string[] order = ["Logs", "Tools", "Services", "Server", "Connect"];
+        foreach (var group in rows.GroupBy(r => SectionOf((ActionSpec)r.Payload!)).Where(g => g.Key != "")
+                     .OrderBy(g => Array.IndexOf(order, g.Key)))
+        {
+            list.Add(new RowItem { Key = "header|" + group.Key, Kind = RowKind.Header, Title = group.Key });
+            list.AddRange(group);
+        }
+        return list;
     }
 
     private static string ServerKey(string org, string serverId) => $"server|{org}|{serverId}";
@@ -317,12 +424,7 @@ public sealed partial class PanelWindow : Window
     {
         var rows = new List<RowItem>();
         var now = NowMs;
-        var refreshing = snap.Orgs.Any(o => o.Refreshing);
-        var last = snap.Orgs.Count == 0 ? 0 : snap.Orgs.Max(o => o.LastRefreshMs);
-        var when = refreshing ? "refreshing…" : last > 0 ? "updated " + ForgeText.RelativeMs(last, now) : "";
-        SetHero("", snap.Orgs.Count == 1 ? snap.Orgs[0].Label : "Forge",
-            string.Join(" · ", new[] { snap.Summary.Replace("Forge — ", ""), when }.Where(s => s != "")),
-            Palette.ToneOf(snap.Health));
+        SetHero("", snap.Orgs.Count == 1 ? snap.Orgs[0].Label : "Forge", "", null);
 
         if (snap.NeedsSetup)
         {
@@ -330,9 +432,18 @@ public sealed partial class PanelWindow : Window
             return rows;
         }
 
-        var many = snap.Orgs.Count > 1;
-        foreach (var org in snap.Orgs)
+        SyncOrgBar(snap);
+        var orgs = snap.Orgs.Where(o => _orgFilter == "" || o.Slug == _orgFilter).ToList();
+        BuildChips(orgs);
+        var query = _query.Trim();
+        bool Matches(string name) => query == "" || name.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+        var many = orgs.Count > 1;
+        foreach (var org in orgs)
         {
+            // A search shows only what matches, so an organization with nothing that does is left out entirely.
+            if (query != "" && !org.Servers.Any(s => Matches(s.Name) || org.SitesOf(s.Id).Any(site => Matches(site.Name))))
+                continue;
             if (many)
                 rows.Add(new RowItem
                 {
@@ -353,7 +464,12 @@ public sealed partial class PanelWindow : Window
             {
                 var key = ServerKey(org.Slug, server.Id);
                 var sites = org.SitesOf(server.Id);
-                var expanded = !_collapsed.Contains(key);
+                if (query != "" && !Matches(server.Name))
+                {
+                    sites = sites.Where(s => Matches(s.Name)).ToList();
+                    if (sites.Count == 0) continue;
+                }
+                var expanded = query != "" || !_collapsed.Contains(key);
                 rows.Add(new RowItem
                 {
                     Key = key, Kind = RowKind.Server, Org = org.Slug, Title = server.Name,
@@ -362,7 +478,7 @@ public sealed partial class PanelWindow : Window
                         ? sites.Count == 0 ? "no sites" : ForgeText.Pluralize(sites.Count, "site") + Worst(sites, expanded)
                         : Status.ServerStateLabel(server.State),
                     Tone = Status.ServerTone(server.State), Depth = depth,
-                    Expanded = sites.Count > 0 ? expanded : null, HasCog = true, Payload = server,
+                    Expanded = sites.Count > 0 ? expanded : null, Payload = server,
                 });
                 if (!expanded) continue;
                 foreach (var site in sites)
@@ -378,7 +494,94 @@ public sealed partial class PanelWindow : Window
                 }
             }
         }
+        if (query != "" && rows.All(r => r.Kind is RowKind.Org or RowKind.Info))
+            rows.Add(Info("no-match", $"Nothing matches “{query}”", "Esc clears the search"));
         return rows;
+    }
+
+    /// <summary>Organization tabs, shown only when there is more than one to choose between.</summary>
+    private void SyncOrgBar(ForgeSnapshot snap)
+    {
+        var wanted = new List<(string Slug, string Label)> { ("", "All") };
+        wanted.AddRange(snap.Orgs.Select(o => (o.Slug, o.Label)));
+        OrgScroll.Visibility = snap.Orgs.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        if (_orgFilter != "" && snap.Org(_orgFilter) is null) _orgFilter = "";
+
+        var current = OrgBar.Items.Select(i => (i.Tag as string ?? "", i.Text)).ToList();
+        _syncingOrgBar = true;
+        try
+        {
+            if (!current.SequenceEqual(wanted))
+            {
+                OrgBar.Items.Clear();
+                foreach (var (slug, label) in wanted)
+                    OrgBar.Items.Add(new SelectorBarItem { Text = label, Tag = slug, IsTabStop = false });
+            }
+            var selected = OrgBar.Items.FirstOrDefault(i => (i.Tag as string ?? "") == _orgFilter);
+            if (selected is not null && OrgBar.SelectedItem != selected) OrgBar.SelectedItem = selected;
+        }
+        finally
+        {
+            _syncingOrgBar = false;
+        }
+    }
+
+    /// <summary>What needs looking at, one chip per kind of trouble; a chip opens the first such site.</summary>
+    private void BuildChips(IReadOnlyList<OrgView> orgs)
+    {
+        ChipPanel.Children.Clear();
+        var sites = orgs.SelectMany(o => o.Servers.SelectMany(s => o.SitesOf(s.Id)).Select(site => (Org: o.Slug, Site: site))).ToList();
+        var down = orgs.SelectMany(o => o.Servers.Where(s => Status.ServerTone(s.State) == Tone.Bad).Select(s => (Org: o.Slug, Server: s))).ToList();
+        if (sites.Count == 0 && down.Count == 0)
+        {
+            ChipPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+        ChipPanel.Visibility = Visibility.Visible;
+
+        if (down.Count > 0)
+            AddChip(Tone.Bad, ForgeText.Pluralize(down.Count, "server") + " down", () =>
+            {
+                var index = _rows.FindIndex(r => r.Key == ServerKey(down[0].Org, down[0].Server.Id));
+                if (index >= 0) MoveTo(index);
+            });
+        foreach (var (tone, word) in new[] { (Tone.Bad, "failed"), (Tone.Busy, "deploying"), (Tone.Warn, "in maintenance") })
+        {
+            var hits = sites.Where(s => Status.SiteTone(s.Site) == tone).ToList();
+            if (hits.Count == 0) continue;
+            var first = hits[0];
+            AddChip(tone, $"{hits.Count} {word}", () => Push(new NavSite { Org = first.Org, SiteKey = first.Site.Key }));
+        }
+        var ok = sites.Count(s => Status.SiteTone(s.Site) is Tone.Ok or Tone.Idle);
+        if (ok > 0 || ChipPanel.Children.Count == 0)
+            AddChip(Tone.Ok, ok == sites.Count ? $"All {ForgeText.Pluralize(sites.Count, "site")} healthy" : $"{ok} healthy", null);
+    }
+
+    private void AddChip(Tone tone, string text, Action? onClick)
+    {
+        var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        content.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse
+        {
+            Width = 8, Height = 8, StrokeThickness = 2, VerticalAlignment = VerticalAlignment.Center,
+            Fill = tone == Tone.Warn ? Palette.Transparent : Palette.For(tone),
+            Stroke = tone == Tone.Warn ? Palette.For(tone) : Palette.Transparent,
+        });
+        content.Children.Add(new TextBlock { Text = text, FontSize = 12 });
+        var chip = new Button
+        {
+            Content = content,
+            Padding = new Thickness(8, 2, 10, 3),
+            MinHeight = 24,
+            CornerRadius = new CornerRadius(12),
+            IsTabStop = false,
+            IsHitTestVisible = onClick is not null,
+        };
+        if (onClick is not null)
+        {
+            chip.Click += (_, _) => onClick();
+            ToolTipService.SetToolTip(chip, "Show it");
+        }
+        ChipPanel.Children.Add(chip);
     }
 
     /// <summary>A folded server still says when something under it needs looking at.</summary>
@@ -417,8 +620,9 @@ public sealed partial class PanelWindow : Window
         Kind = RowKind.Action,
         Org = org,
         Title = a.Label,
-        Status = a.Available ? a.Hint : a.Reason,
+        Status = a.Available ? a.Hint.ToUpperInvariant() : a.Reason,
         Enabled = a.Available,
+        Glyph = GlyphFor(a),
         ArmKey = !a.Armable ? "" : a.ArmsSubject ? DeployKey(org, deploySiteKey) : $"{a.Id}|{org}|{subjectKey}|{a.ArmIntent}",
         Payload = a,
     };
@@ -429,10 +633,18 @@ public sealed partial class PanelWindow : Window
         var server = org?.ServerById(nav.ServerId);
         SetHero(org?.Label ?? nav.Org, server?.Name ?? "Server",
             server is null ? "No longer listed"
-                : string.Join(" · ", new[] { Status.ServerStateLabel(server.State), server.Kind, Status.ServerMeta(server) }.Where(s => s != "")),
+                : string.Join(" · ", new[] { Capitalize(Status.ServerStateLabel(server.State)), server.Kind, Status.ServerMeta(server) }.Where(s => s != "")),
             server is null ? Tone.Idle : Status.ServerTone(server.State));
-        return Actions.ServerActions(nav.Org, server).Select(a => ActionRow(a, nav.Org, nav.ServerId)).ToList();
+        return Sectioned(ServerActionRows(snap, nav));
     }
+
+    private List<RowItem> ServerActionRows(ForgeSnapshot snap, NavServer nav) =>
+        Actions.ServerActions(nav.Org, snap.Org(nav.Org)?.ServerById(nav.ServerId))
+            .Select(a => ActionRow(a, nav.Org, nav.ServerId)).ToList();
+
+    private List<RowItem> SiteActionRows(ForgeSnapshot snap, NavSite nav) =>
+        Actions.SiteActions(nav.Org, snap.Org(nav.Org)?.SiteByKey(nav.SiteKey))
+            .Select(a => ActionRow(a, nav.Org, nav.SiteKey, nav.SiteKey)).ToList();
 
     private List<RowItem> SiteRows(ForgeSnapshot snap, NavSite nav)
     {
@@ -443,12 +655,66 @@ public sealed partial class PanelWindow : Window
         var subtitle = site is null ? "No longer listed"
             : string.Join(" · ", new[]
             {
-                st.Label + (st.Timed && site.DeployedAt != "" ? " " + ForgeText.RelativeTime(site.DeployedAt, NowMs) : ""),
+                Capitalize(st.Label) + (st.Timed && site.DeployedAt != "" ? " " + ForgeText.RelativeTime(site.DeployedAt, NowMs) : ""),
                 SiteLine(site),
             }.Where(s => s != ""));
-        SetHero($"{org?.Label ?? nav.Org} › {server?.Name ?? "server"}", site?.Name ?? "Site", subtitle, st.Tone);
-        foreach (var (label, value) in Status.SiteDetails(site)) AddDetail($"{label}: {value}");
-        return Actions.SiteActions(nav.Org, site).Select(a => ActionRow(a, nav.Org, nav.SiteKey, nav.SiteKey)).ToList();
+        SetHero($"{org?.Label ?? nav.Org} › {server?.Name ?? "server"}", site?.Name ?? "Site", subtitle, st.Tone,
+            st.Tone is Tone.Bad or Tone.Busy ? Palette.Text(st.Tone) : null);
+
+        var rows = SiteActionRows(snap, nav);
+        ShowSitePage(nav, site, rows);
+        return Sectioned(rows);
+    }
+
+    /// <summary>The page above a site's action list: deploy and open, what is happening, its facts, maintenance mode.</summary>
+    private void ShowSitePage(NavSite nav, Site? site, List<RowItem> rows)
+    {
+        DetailPanel.Visibility = Visibility.Visible;
+        var tone = Status.SiteTone(site);
+        var deploy = rows.First(r => r.Payload is ActionSpec { Id: "deploy" });
+        var open = rows.First(r => r.Payload is ActionSpec { Id: "open" });
+        var maintenance = rows.First(r => r.Payload is ActionSpec { Id: "maintenance" });
+        var deployArmed = _armedKey != "" && _armedKey == deploy.ArmKey;
+        var deploying = tone == Tone.Busy && site?.MaintenanceStatus == "" || _busyKey == deploy.ArmKey;
+
+        DeployButton.IsEnabled = deploy.Enabled && !deploying && !deployArmed;
+        DeployButtonText.Text = deploying ? "Deploying…" : "Deploy";
+        ToolTipService.SetToolTip(DeployButton, deploy.Enabled ? "Deploy (D)" : "Can't deploy: " + ((ActionSpec)deploy.Payload!).Reason);
+        OpenSiteButton.IsEnabled = open.Enabled;
+
+        if (deploying)
+        {
+            SiteInfo.Severity = InfoBarSeverity.Informational;
+            SiteInfo.Title = "Deploying";
+            SiteInfo.Message = "Checking every 15 seconds";
+            SiteInfo.Content = new ProgressBar { IsIndeterminate = true, Margin = new Thickness(0, 0, 0, 10) };
+            SiteInfoLink.Content = "Follow log";
+            SiteInfo.IsOpen = true;
+        }
+        else if (tone == Tone.Bad)
+        {
+            SiteInfo.Severity = InfoBarSeverity.Error;
+            SiteInfo.Title = "The last deploy failed";
+            SiteInfo.Message = "";
+            SiteInfo.Content = null;
+            SiteInfoLink.Content = "View log";
+            SiteInfo.IsOpen = true;
+        }
+        else SiteInfo.IsOpen = false;
+
+        // Maintenance is drawn with the facts' card, so it isn't repeated there.
+        SetFacts(Status.SiteDetails(site).Where(f => f.Label != "Maintenance").ToList());
+
+        var parked = site?.Maintenance == true;
+        var spec = (ActionSpec)maintenance.Payload!;
+        _syncingSwitch = true;
+        MaintenanceSwitch.IsOn = parked;
+        _syncingSwitch = false;
+        MaintenanceSwitch.IsEnabled = maintenance.Enabled && _busyKey != maintenance.ArmKey;
+        MaintenanceText.Text = !maintenance.Enabled ? Capitalize(spec.Reason)
+            : parked ? "Visitors get a 503 page" : "Visitors see the site";
+        MaintenanceCard.Visibility = site is null ? Visibility.Collapsed : Visibility.Visible;
+        SiteButtons.Visibility = site is null ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private List<RowItem> ListRows(ForgeSnapshot snap, NavList nav)
@@ -541,29 +807,12 @@ public sealed partial class PanelWindow : Window
         SetHero(site?.Name ?? "", "Run a command", "", null);
         var spec = Actions.SiteCommand(nav.Org, site, CommandBox.Text);
         var armed = _armedKey != "" && _armedKey == CommandArmKey(nav, spec.ArmIntent);
-        CommandState.Text = armed ? _armedText + " · any other key cancels"
-            : _busyKey.StartsWith("command-run|", StringComparison.Ordinal) ? "sending…"
-            : spec.Available ? "Enter arms it, then a capital Y sends it" : spec.Reason;
+        var sending = _busyKey.StartsWith("command-run|", StringComparison.Ordinal);
+        CommandState.Text = armed ? _armedText
+            : sending ? "Sending…"
+            : spec.Available ? "Enter or Run asks before it sends" : Capitalize(spec.Reason);
         CommandState.Foreground = armed ? Palette.Accent : Palette.Secondary;
-    }
-
-    private string Hint()
-    {
-        if (_armedKey != "") return "[Y] confirm · any other key cancels";
-        return Top switch
-        {
-            NavPane p => p.Watch is not null ? "r look again · c copy · w save · ← back" : "c copy · w save · r reload · ← back",
-            NavCommand => "⏎ arm · Y send · Esc back",
-            NavList => "⏎ open · r reload · ← back · Esc close",
-            NavServer => "⏎ select · e events · s ssh · t terminal · ← back",
-            NavSite => "⏎ select · d deploy · o open · f Forge · ← back",
-            _ => CursorRow?.Kind switch
-            {
-                RowKind.Site => "⏎ open · d deploy · o site · f Forge · s ssh · r refresh",
-                RowKind.Server => "⏎ fold · → actions · e events · s ssh · t terminal",
-                _ => "↑↓ move · r refresh · , settings · Esc close",
-            },
-        };
+        RunButton.IsEnabled = spec.Available && !armed && !sending;
     }
 
     private void Flash(string message, bool bad = false)
@@ -611,15 +860,29 @@ public sealed partial class PanelWindow : Window
         FocusContent();
     }
 
-    private void Move(int delta) => MoveTo(_cursor + delta);
+    private void Move(int delta)
+    {
+        if (_rows.Count == 0) return;
+        var target = Math.Clamp(_cursor + delta, 0, _rows.Count - 1);
+        // Step over section titles in the direction of travel; at an end, settle on the nearest real row.
+        MoveTo(NearestSelectable(target, Math.Sign(delta) == 0 ? 1 : Math.Sign(delta)));
+    }
+
+    private int NearestSelectable(int index, int direction)
+    {
+        for (var i = index; i >= 0 && i < _rows.Count; i += direction)
+            if (_rows[i].Selectable) return i;
+        for (var i = index; i >= 0 && i < _rows.Count; i -= direction)
+            if (_rows[i].Selectable) return i;
+        return Math.Clamp(index, 0, Math.Max(0, _rows.Count - 1));
+    }
 
     private void MoveTo(int index)
     {
         if (_rows.Count == 0) return;
-        _cursor = Math.Clamp(index, 0, _rows.Count - 1);
+        _cursor = NearestSelectable(Math.Clamp(index, 0, _rows.Count - 1), 1);
         RowList.SelectedIndex = _cursor;
         RowList.ScrollIntoView(_rows[_cursor]);
-        HintText.Text = Hint();
     }
 
     private void Activate(RowItem row)
@@ -724,15 +987,91 @@ public sealed partial class PanelWindow : Window
 
     // ------------------------------------------------------------- actions
 
-    private void Arm(string key, string text, Func<bool> valid, Func<Task> send)
+    /// <summary>
+    /// A write asks before it is sent. Cancel is the dialog's default, so Enter
+    /// and Esc both drop it; the write goes only by its own button or a capital Y,
+    /// the same deliberate press the keyboard flow has always needed.
+    /// </summary>
+    private async void Arm(string key, string title, string body, string cta, Func<bool> valid, Func<Task> send)
     {
+        if (_confirmDialog is not null) return;
         _armedKey = key;
-        _armedText = text;
+        _armedText = "Waiting for you to confirm";
         _armedValid = valid;
         _armedSend = send;
-        _armTimer.Stop();
-        _armTimer.Start();
         Render();
+
+        var text = new StackPanel { Spacing = 12 };
+        text.Children.Add(new TextBlock { Text = body, TextWrapping = TextWrapping.Wrap });
+        text.Children.Add(new TextBlock
+        {
+            Text = "Shift+Y also confirms. Enter or Esc cancels.",
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = Palette.Secondary,
+        });
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Root.XamlRoot,
+            Title = title,
+            Content = text,
+            PrimaryButtonText = cta,
+            CloseButtonText = "Cancel",
+            // No default button: a default is drawn as the accent, and the accent belongs on the write.
+            // Focus starts on Cancel instead, so Enter cancels.
+            DefaultButton = ContentDialogButton.None,
+            PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"],
+            RequestedTheme = Root.ActualTheme,
+        };
+        dialog.Opened += (_, _) =>
+        {
+            if (FindDescendant(dialog, "CloseButton") is Control cancel) cancel.Focus(FocusState.Keyboard);
+        };
+        var byKey = false;
+        dialog.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == VirtualKey.Y && IsDown(VirtualKey.Shift) && !IsDown(VirtualKey.Control))
+            {
+                e.Handled = true;
+                byKey = true;
+                dialog.Hide();
+            }
+        };
+        _confirmDialog = dialog;
+        ContentDialogResult result;
+        try
+        {
+            result = await dialog.ShowAsync();
+        }
+        catch (Exception e)
+        {
+            Log.Write("Confirm dialog: " + e.Message);
+            result = ContentDialogResult.None;
+        }
+        finally
+        {
+            _confirmDialog = null;
+        }
+
+        if (_armedKey != key) return;
+        if (result == ContentDialogResult.Primary || byKey) Confirm();
+        else
+        {
+            Disarm();
+            Flash("Not sent");
+            Render();
+            FocusContent();
+        }
+    }
+
+    private static FrameworkElement? FindDescendant(DependencyObject root, string name)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is FrameworkElement fe && fe.Name == name) return fe;
+            if (FindDescendant(child, name) is { } found) return found;
+        }
+        return null;
     }
 
     private void Disarm()
@@ -741,7 +1080,21 @@ public sealed partial class PanelWindow : Window
         _armedText = "";
         _armedValid = null;
         _armedSend = null;
-        _armTimer.Stop();
+        _confirmDialog?.Hide();
+    }
+
+    /// <summary>The dialog's wording for an action from a server's or site's list.</summary>
+    private static (string Title, string Body, string Cta) Wording(ActionSpec spec, string subject)
+    {
+        var what = spec.ArmedText.StartsWith("press Y to ", StringComparison.Ordinal) ? spec.ArmedText["press Y to ".Length..] : spec.Label;
+        return spec.Id switch
+        {
+            "maintenance" when spec.ArmIntent == "on" =>
+                ("Turn on maintenance mode?", $"Visitors to {subject} get a 503 page until you turn it off.", "Turn on"),
+            "maintenance" => ("Turn off maintenance mode?", $"{subject} starts serving visitors again.", "Turn off"),
+            "reboot" => ($"Reboot {subject}?", "Every site on it is offline until it is back up.", "Reboot"),
+            _ => ($"{spec.Label}?", $"This will {what} on {subject}.", spec.Label.Split(' ')[0]),
+        };
     }
 
     private async void Confirm()
@@ -778,8 +1131,8 @@ public sealed partial class PanelWindow : Window
     private bool RowStillArmable(string key) =>
         Top switch
         {
-            NavServer s => ServerRows(_service.Snapshot, s).Any(r => r.ArmKey == key && r.Enabled),
-            NavSite s => SiteRows(_service.Snapshot, s).Any(r => r.ArmKey == key && r.Enabled),
+            NavServer s => ServerActionRows(_service.Snapshot, s).Any(r => r.ArmKey == key && r.Enabled),
+            NavSite s => SiteActionRows(_service.Snapshot, s).Any(r => r.ArmKey == key && r.Enabled),
             _ => false,
         };
 
@@ -799,7 +1152,11 @@ public sealed partial class PanelWindow : Window
                 NavServer s => s.ServerId,
                 _ => CurrentSite()?.Site.ServerId ?? "",
             };
-            Arm(row.ArmKey, spec.ArmedText, () => RowStillArmable(row.ArmKey), async () =>
+            var subject = Top is NavServer ? CurrentServer()?.Server.Name ?? "this server"
+                : spec.Id == "maintenance" ? CurrentSite()?.Site.Name ?? "this site"
+                : _service.Snapshot.Org(org)?.ServerById(serverId)?.Name ?? "this server";
+            var (title, body, cta) = Wording(spec, subject);
+            Arm(row.ArmKey, title, body, cta, () => RowStillArmable(row.ArmKey), async () =>
             {
                 var outcome = await _service.SendActionAsync(org, serverId, spec);
                 Flash(outcome.Message, !outcome.Ok);
@@ -841,7 +1198,9 @@ public sealed partial class PanelWindow : Window
             Flash(site.Name + " has no repository to deploy");
             return;
         }
-        Arm(DeployKey(org, site.Key), "press Y to deploy " + site.Name,
+        var serverName = _service.Snapshot.Org(org)?.ServerById(site.ServerId)?.Name ?? "its server";
+        Arm(DeployKey(org, site.Key), $"Deploy {site.Name}?",
+            $"Runs the deploy script on {serverName}. You can follow the log while it runs.", "Deploy",
             () => _service.Snapshot.Org(org)?.SiteByKey(site.Key) is { } s && Status.CanDeploy(s),
             async () =>
             {
@@ -864,7 +1223,8 @@ public sealed partial class PanelWindow : Window
             return;
         }
         var text = spec.ArmIntent;
-        Arm(CommandArmKey(nav, text), spec.ArmedText,
+        Arm(CommandArmKey(nav, text), "Run this command?",
+            $"{text}\n\nRuns on {site.Name} as the site's user.", "Run",
             () => Top == nav && CommandBox.Text.Trim() == text,
             async () =>
             {
@@ -888,7 +1248,8 @@ public sealed partial class PanelWindow : Window
             Flash(spec.Reason);
             return;
         }
-        Arm(row.ArmKey, spec.ArmedText,
+        Arm(row.ArmKey, $"Run {recipe.Name}?",
+            $"Runs the recipe on {server.Name}" + (recipe.User == "" ? "." : $" as {recipe.User}."), "Run",
             () => _service.Snapshot.Org(list.Org)?.ServerById(list.ServerId)?.State == ServerState.Ready,
             async () =>
             {
@@ -1151,6 +1512,15 @@ public sealed partial class PanelWindow : Window
         or VirtualKey.CapitalLock;
 
     private const VirtualKey Comma = (VirtualKey)188;
+    private const VirtualKey Slash = (VirtualKey)191;
+
+    private bool IsInside(DependencyObject target)
+    {
+        if (Root.XamlRoot is null) return false;
+        for (var node = FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject; node is not null; node = VisualTreeHelper.GetParent(node))
+            if (node == target) return true;
+        return false;
+    }
 
     private void Root_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
@@ -1159,16 +1529,32 @@ public sealed partial class PanelWindow : Window
         var shift = IsDown(VirtualKey.Shift);
         var ctrl = IsDown(VirtualKey.Control);
 
-        // An armed panel owns the next input: a capital Y sends, anything else drops the arm and does nothing else.
-        if (_armedKey != "")
+        // While the confirm dialog is up it owns the keyboard; nothing here may act behind it.
+        if (_confirmDialog is not null) return;
+
+        if (Top is NavTree && ctrl && key == VirtualKey.F)
         {
             e.Handled = true;
-            if (key == VirtualKey.Y && shift && !ctrl) Confirm();
-            else
+            SearchBox.Focus(FocusState.Keyboard);
+            return;
+        }
+
+        // Typing in the search box is text, not shortcuts; only the keys that leave it are taken.
+        if (IsInside(SearchBox))
+        {
+            switch (key)
             {
-                Disarm();
-                Flash("Not sent");
-                Render();
+                case VirtualKey.Escape:
+                    e.Handled = true;
+                    if (SearchBox.Text != "") SearchBox.Text = "";
+                    else RowList.Focus(FocusState.Programmatic);
+                    break;
+                case VirtualKey.Down or VirtualKey.Enter:
+                    e.Handled = true;
+                    MoveTo(0);
+                    RowList.Focus(FocusState.Programmatic);
+                    if (key == VirtualKey.Enter && CursorRow is { } first) Activate(first);
+                    break;
             }
             return;
         }
@@ -1208,8 +1594,14 @@ public sealed partial class PanelWindow : Window
             case VirtualKey.Enter or VirtualKey.Space: if (CursorRow is { } row) Activate(row); break;
             case VirtualKey.Right or VirtualKey.L: DrillIn(); break;
             case VirtualKey.Left or VirtualKey.H or VirtualKey.Back: Back(); break;
-            case VirtualKey.Escape: if (_nav.Count > 1) Pop(); else HidePanel(); break;
+            case VirtualKey.Escape:
+                if (_nav.Count > 1) Pop();
+                else if (_query != "") SearchBox.Text = "";
+                else HidePanel();
+                break;
             case VirtualKey.D: ArmDeploy(); break;
+            case VirtualKey.M: ArmMaintenance(); break;
+            case Slash when shift: KeysFlyout.ShowAt(KeysButton); break;
             case VirtualKey.O: OpenSite(); break;
             case VirtualKey.F: OpenForge(); break;
             case VirtualKey.S: CopySsh(); break;
@@ -1223,35 +1615,164 @@ public sealed partial class PanelWindow : Window
 
     private void RowList_ItemClick(object sender, ItemClickEventArgs e)
     {
-        if (e.ClickedItem is not RowItem row) return;
+        if (e.ClickedItem is not RowItem { Selectable: true } row) return;
         _cursor = _rows.IndexOf(row);
-        if (_armedKey != "")
-        {
-            // The pointer arms but never sends: a click while armed is a cancel like any other press.
-            Disarm();
-            Flash("Not sent");
-            Render();
-            return;
-        }
         Activate(row);
+    }
+
+    /// <summary>Section titles can't be clicked, hovered or tabbed to.</summary>
+    private void RowList_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        if (args.Item is not RowItem row) return;
+        args.ItemContainer.IsHitTestVisible = row.Selectable;
+        args.ItemContainer.IsTabStop = row.Selectable;
+        if (args.ItemContainer.ContentTemplateRoot is Grid grid) ShowQuickActions(grid, false);
     }
 
     private void RowList_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
-        if ((e.OriginalSource as FrameworkElement)?.DataContext is not RowItem row) return;
-        _cursor = _rows.IndexOf(row);
-        if (row is { Kind: RowKind.Server, Payload: Server server }) Push(new NavServer { Org = row.Org, ServerId = server.Id });
-        else if (row is { Kind: RowKind.Site, Payload: Site site }) Push(new NavSite { Org = row.Org, SiteKey = site.Key });
+        if (e.OriginalSource is not FrameworkElement { DataContext: RowItem row } source) return;
+        if (!SelectRow(row.Key)) return;
+        if (MenuFor(row) is not { } menu) return;
+        e.Handled = true;
+        menu.ShowAt(source, new FlyoutShowOptions { Position = e.GetPosition(source) });
     }
 
-    private void Cog_Click(object sender, RoutedEventArgs e)
+    /// <summary>Puts the cursor on a row, so the actions that act on "the current site" act on that one.</summary>
+    private bool SelectRow(string key)
     {
-        if (sender is not FrameworkElement { Tag: string key }) return;
         var index = _rows.FindIndex(r => r.Key == key);
-        if (index < 0 || _rows[index].Payload is not Server server) return;
-        _cursor = index;
-        Push(new NavServer { Org = _rows[index].Org, ServerId = server.Id });
+        if (index < 0) return false;
+        MoveTo(index);
+        return true;
     }
+
+    /// <summary>A site's or server's right-click menu: the everyday actions, and a way to all of them.</summary>
+    private MenuFlyout? MenuFor(RowItem row)
+    {
+        var menu = new MenuFlyout();
+        void Item(string text, string glyph, string keys, Action run, bool enabled = true)
+        {
+            var item = new MenuFlyoutItem
+            {
+                Text = text,
+                Icon = new FontIcon { Glyph = glyph, FontFamily = (FontFamily)Application.Current.Resources["IconFont"] },
+                KeyboardAcceleratorTextOverride = keys,
+                IsEnabled = enabled,
+            };
+            item.Click += (_, _) => run();
+            menu.Items.Add(item);
+        }
+        void Separator() => menu.Items.Add(new MenuFlyoutSeparator());
+
+        switch (row)
+        {
+            case { Kind: RowKind.Site, Payload: Site site }:
+                Item("Deploy", "", "D", ArmDeploy, Status.CanDeploy(site));
+                Item("Open site", "", "O", OpenSite, ForgeText.ExternalUrl(site.Url) != "");
+                Item("Open in Forge", "", "F", OpenForge);
+                Separator();
+                Item("Deployment log", "", "", OpenDeployLog, site.DeploymentId != "");
+                Item("Application log", "", "", () => OpenSiteLog("application"));
+                Separator();
+                Item("Copy ssh command", "", "S", CopySsh);
+                Item("Open ssh in Windows Terminal", "", "T", OpenTerminal);
+                Separator();
+                Item("All actions", "", "Enter", () => Push(new NavSite { Org = row.Org, SiteKey = site.Key }));
+                return menu;
+            case { Kind: RowKind.Server, Payload: Server server }:
+                Item("Server actions", "", "→", () => Push(new NavServer { Org = row.Org, ServerId = server.Id }));
+                Item("Server events", "", "E", () => OpenList(ListKind.Events));
+                Item("Open in Forge", "", "F", OpenForge);
+                Separator();
+                Item("Copy ssh command", "", "S", CopySsh);
+                Item("Open ssh in Windows Terminal", "", "T", OpenTerminal);
+                if (row.Expanded is { } open)
+                {
+                    Separator();
+                    Item(open ? "Fold" : "Unfold", open ? "" : "", "Enter", () => ToggleFold(row));
+                }
+                return menu;
+            default:
+                return null;
+        }
+    }
+
+    private void Row_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Grid { DataContext: RowItem { HasQuickActions: true } } grid) ShowQuickActions(grid, true);
+    }
+
+    private void Row_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Grid grid) ShowQuickActions(grid, false);
+    }
+
+    /// <summary>On hover a row trades its status for buttons, the way File Explorer's rows do.</summary>
+    private static void ShowQuickActions(Grid grid, bool show)
+    {
+        if (grid.FindName("QuickActions") is UIElement actions) actions.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (grid.FindName("Trailing") is UIElement trailing && grid.DataContext is RowItem row)
+            trailing.Visibility = show ? Visibility.Collapsed : row.BodyVisibility;
+    }
+
+    private void OnRow(object sender, Action run)
+    {
+        if (sender is FrameworkElement { Tag: string key } && SelectRow(key)) run();
+    }
+
+    private void QuickDeploy_Click(object sender, RoutedEventArgs e) => OnRow(sender, ArmDeploy);
+    private void QuickOpen_Click(object sender, RoutedEventArgs e) => OnRow(sender, OpenSite);
+    private void QuickEvents_Click(object sender, RoutedEventArgs e) => OnRow(sender, () => OpenList(ListKind.Events));
+    private void QuickTerminal_Click(object sender, RoutedEventArgs e) => OnRow(sender, OpenTerminal);
+
+    private void QuickMore_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string key } button || !SelectRow(key) || CursorRow is not { } row) return;
+        MenuFor(row)?.ShowAt(button, new FlyoutShowOptions { Placement = FlyoutPlacementMode.BottomEdgeAlignedRight });
+    }
+
+    private void ArmMaintenance()
+    {
+        if (Top is not NavSite nav) { Flash("Open a site first"); return; }
+        var row = SiteActionRows(_service.Snapshot, nav).FirstOrDefault(r => r.Payload is ActionSpec { Id: "maintenance" });
+        if (row?.Payload is ActionSpec spec) RunAction(row, spec);
+    }
+
+    private void MaintenanceSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_syncingSwitch) return;
+        // The switch only asks; it shows the site's real state until Forge reports the change.
+        _syncingSwitch = true;
+        MaintenanceSwitch.IsOn = !MaintenanceSwitch.IsOn;
+        _syncingSwitch = false;
+        ArmMaintenance();
+    }
+
+    private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (_query == sender.Text) return;
+        _query = sender.Text;
+        _cursor = 0;
+        if (Top is NavTree) Render();
+    }
+
+    private void OrgBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        if (_syncingOrgBar) return;
+        _orgFilter = sender.SelectedItem?.Tag as string ?? "";
+        _cursor = 0;
+        Render();
+    }
+
+    private void BackButton_Click(object sender, RoutedEventArgs e) => Pop();
+    private void DeployButton_Click(object sender, RoutedEventArgs e) => ArmDeploy();
+    private void OpenSiteButton_Click(object sender, RoutedEventArgs e) => OpenSite();
+    private void SiteInfoLink_Click(object sender, RoutedEventArgs e) => OpenDeployLog();
+    private void RunButton_Click(object sender, RoutedEventArgs e) => ArmCommand();
+    private void PaneReload_Click(object sender, RoutedEventArgs e) => Refresh();
+    private void PaneCopy_Click(object sender, RoutedEventArgs e) { if (Top is NavPane p) CopyPane(p); }
+    private void PaneSave_Click(object sender, RoutedEventArgs e) { if (Top is NavPane p) SavePane(p); }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e) => Refresh();
 
