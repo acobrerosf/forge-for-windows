@@ -63,7 +63,7 @@
                     <TextBlock x:Name="LogText" FontFamily="{StaticResource MonoFont}" FontSize="12.5" LineHeight="20"
                                IsTextSelectionEnabled="True" TextWrapping="NoWrap" Padding="14,10,16,14" />
                 </ScrollViewer>
-                <ProgressRing x:Name="Loading" IsActive="False" Width="28" Height="28" />
+                <ProgressRing x:Name="LoadingRing" IsActive="False" Width="28" Height="28" />
             </Grid>
         </Border>
     </Grid>

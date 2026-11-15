@@ -89,7 +89,7 @@ public sealed partial class LogView : UserControl
 
     private void Render(bool scroll)
     {
-        Loading.IsActive = _loading;
+        LoadingRing.IsActive = _loading;
         HeaderText.Visibility = HeaderText.Text == "" ? Visibility.Collapsed : Visibility.Visible;
         var find = FindBox.Text.Trim();
         var shown = find == "" ? _lines : _lines.Where(l => l.Contains(find, StringComparison.OrdinalIgnoreCase)).ToList();
