@@ -20,6 +20,7 @@ public partial class App : Application
     private TrayIconController? _tray;
     private PanelWindow? _panel;
     private SettingsWindow? _settings;
+    private ForgeWindow? _window;
     private bool _quitting;
 
     public App()
@@ -41,8 +42,8 @@ public partial class App : Application
 
         Notifications.Initialize(args => _ui.TryEnqueue(() => OnToast(args)));
 
-        _panel = new PanelWindow(_service, OpenSettings);
-        _tray = new TrayIconController(TogglePanel, OpenSettings, _service.RefreshNow, Quit,
+        _panel = new PanelWindow(_service, OpenSettings, OpenWindow);
+        _tray = new TrayIconController(TogglePanel, () => OpenWindow(null, null), OpenSettings, _service.RefreshNow, Quit,
             () => _service.Setup.Settings.NotifyDeployments,
             on => _service.UpdateSettings(_service.Setup.Settings with { NotifyDeployments = on }));
 
@@ -77,6 +78,7 @@ public partial class App : Application
         _tray?.Update(snapshot);
         _panel?.OnServiceChanged();
         _settings?.OnServiceChanged();
+        _window?.OnServiceChanged();
 #if DEBUG
         ShowTestToast(snapshot);
 #endif
@@ -141,6 +143,17 @@ public partial class App : Application
 
     private void TogglePanel() => _panel?.Toggle();
 
+    /// <summary>The expanded window: one at a time, made on first use and dropped when closed.</summary>
+    private void OpenWindow(string? org, string? siteKey)
+    {
+        if (_window is null)
+        {
+            _window = new ForgeWindow(_service, OpenSettings);
+            _window.Closed += (_, _) => _window = null;
+        }
+        _window.ShowAndFocus(org, siteKey);
+    }
+
     private void OpenSettings()
     {
         _panel?.HidePanel();
@@ -159,6 +172,7 @@ public partial class App : Application
         _tray?.Dispose();
         _tray = null;
         _settings?.Close();
+        _window?.Close();
         _panel?.CloseForGood();
         await _service.DisposeAsync();
         Exit();

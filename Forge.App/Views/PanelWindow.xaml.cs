@@ -32,6 +32,8 @@ public sealed partial class PanelWindow : Window
 
     private readonly ForgeService _service;
     private readonly Action _openSettings;
+    /// <summary>Opens the expanded window, on a site when given one (organization slug, site key).</summary>
+    private readonly Action<string?, string?> _openWindow;
     private readonly List<Nav> _nav = [new NavTree()];
     private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
     private readonly DispatcherQueueTimer _flashTimer;
@@ -59,10 +61,11 @@ public sealed partial class PanelWindow : Window
     private long _hiddenAtMs;
     private IReadOnlyList<string>? _paneShown;
 
-    public PanelWindow(ForgeService service, Action openSettings)
+    public PanelWindow(ForgeService service, Action openSettings, Action<string?, string?> openWindow)
     {
         _service = service;
         _openSettings = openSettings;
+        _openWindow = openWindow;
         InitializeComponent();
 
         var queue = DispatcherQueue;
@@ -88,6 +91,7 @@ public sealed partial class PanelWindow : Window
         ("←  h  Backspace", "Back"),
         ("Esc", "Back, then close"),
         ("Ctrl+F", "Search"),
+        ("Ctrl+O", "Open in a window"),
         ("d", "Deploy the current site"),
         ("m", "Maintenance mode (on a site)"),
         ("Shift+Y", "Confirm what a dialog asks"),
@@ -383,7 +387,7 @@ public sealed partial class PanelWindow : Window
                 Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
                 Foreground = Palette.Secondary,
             });
-            cell.Children.Add(new TextBlock { Text = Capitalize(facts[i].Value), TextTrimming = TextTrimming.CharacterEllipsis });
+            cell.Children.Add(new TextBlock { Text = ForgeWindow.FactValue(facts[i].Label, facts[i].Value), TextTrimming = TextTrimming.CharacterEllipsis });
             ToolTipService.SetToolTip(cell, facts[i].Value);
             Grid.SetRow(cell, i / 2);
             Grid.SetColumn(cell, i % 2);
@@ -1017,59 +1021,9 @@ public sealed partial class PanelWindow : Window
         _armedSend = send;
         Render();
 
-        var text = new StackPanel { Spacing = 12 };
-        text.Children.Add(new TextBlock { Text = body, TextWrapping = TextWrapping.Wrap });
-        text.Children.Add(new TextBlock
-        {
-            Text = "Shift+Y also confirms. Enter or Esc cancels.",
-            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-            Foreground = Palette.Secondary,
-        });
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Root.XamlRoot,
-            Title = title,
-            Content = text,
-            PrimaryButtonText = cta,
-            CloseButtonText = "Cancel",
-            // No default button: a default is drawn as the accent, and the accent belongs on the write.
-            // Focus starts on Cancel instead, so Enter cancels.
-            DefaultButton = ContentDialogButton.None,
-            PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"],
-            RequestedTheme = Root.ActualTheme,
-        };
-        dialog.Opened += (_, _) =>
-        {
-            if (FindDescendant(dialog, "CloseButton") is Control cancel) cancel.Focus(FocusState.Keyboard);
-        };
-        var byKey = false;
-        dialog.PreviewKeyDown += (_, e) =>
-        {
-            if (e.Key == VirtualKey.Y && IsDown(VirtualKey.Shift) && !IsDown(VirtualKey.Control))
-            {
-                e.Handled = true;
-                byKey = true;
-                dialog.Hide();
-            }
-        };
-        _confirmDialog = dialog;
-        ContentDialogResult result;
-        try
-        {
-            result = await dialog.ShowAsync();
-        }
-        catch (Exception e)
-        {
-            Log.Write("Confirm dialog: " + e.Message);
-            result = ContentDialogResult.None;
-        }
-        finally
-        {
-            _confirmDialog = null;
-        }
-
+        var yes = await WriteConfirm.AskAsync(Root.XamlRoot, Root.ActualTheme, title, body, cta, d => _confirmDialog = d);
         if (_armedKey != key) return;
-        if (result == ContentDialogResult.Primary || byKey) Confirm();
+        if (yes) Confirm();
         else
         {
             Disarm();
@@ -1079,17 +1033,6 @@ public sealed partial class PanelWindow : Window
         }
     }
 
-    private static FrameworkElement? FindDescendant(DependencyObject root, string name)
-    {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-        {
-            var child = VisualTreeHelper.GetChild(root, i);
-            if (child is FrameworkElement fe && fe.Name == name) return fe;
-            if (FindDescendant(child, name) is { } found) return found;
-        }
-        return null;
-    }
-
     private void Disarm()
     {
         _armedKey = "";
@@ -1097,20 +1040,6 @@ public sealed partial class PanelWindow : Window
         _armedValid = null;
         _armedSend = null;
         _confirmDialog?.Hide();
-    }
-
-    /// <summary>The dialog's wording for an action from a server's or site's list.</summary>
-    private static (string Title, string Body, string Cta) Wording(ActionSpec spec, string subject)
-    {
-        var what = spec.ArmedText.StartsWith("press Y to ", StringComparison.Ordinal) ? spec.ArmedText["press Y to ".Length..] : spec.Label;
-        return spec.Id switch
-        {
-            "maintenance" when spec.ArmIntent == "on" =>
-                ("Turn on maintenance mode?", $"Visitors to {subject} get a 503 page until you turn it off.", "Turn on"),
-            "maintenance" => ("Turn off maintenance mode?", $"{subject} starts serving visitors again.", "Turn off"),
-            "reboot" => ($"Reboot {subject}?", "Every site on it is offline until it is back up.", "Reboot"),
-            _ => ($"{spec.Label}?", $"This will {what} on {subject}.", spec.Label.Split(' ')[0]),
-        };
     }
 
     private async void Confirm()
@@ -1171,7 +1100,7 @@ public sealed partial class PanelWindow : Window
             var subject = Top is NavServer ? CurrentServer()?.Server.Name ?? "this server"
                 : spec.Id == "maintenance" ? CurrentSite()?.Site.Name ?? "this site"
                 : _service.Snapshot.Org(org)?.ServerById(serverId)?.Name ?? "this server";
-            var (title, body, cta) = Wording(spec, subject);
+            var (title, body, cta) = WriteConfirm.Wording(spec, subject);
             Arm(row.ArmKey, title, body, cta, () => RowStillArmable(row.ArmKey), async () =>
             {
                 var outcome = await _service.SendActionAsync(org, serverId, spec);
@@ -1548,6 +1477,13 @@ public sealed partial class PanelWindow : Window
         // While the confirm dialog is up it owns the keyboard; nothing here may act behind it.
         if (_confirmDialog is not null) return;
 
+        if (ctrl && key == VirtualKey.O)
+        {
+            e.Handled = true;
+            OpenWindow();
+            return;
+        }
+
         if (Top is NavTree && ctrl && key == VirtualKey.F)
         {
             e.Handled = true;
@@ -1793,6 +1729,16 @@ public sealed partial class PanelWindow : Window
     private void RefreshButton_Click(object sender, RoutedEventArgs e) => Refresh();
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e) => _openSettings();
+
+    private void WindowButton_Click(object sender, RoutedEventArgs e) => OpenWindow();
+
+    /// <summary>Moves to the expanded window, on whatever site the flyout is showing or pointing at.</summary>
+    private void OpenWindow()
+    {
+        var current = CurrentSite();
+        HidePanel();
+        _openWindow(current?.Org, current?.Site.Key);
+    }
 
     // ---------------------------------------------------------------- win32
 

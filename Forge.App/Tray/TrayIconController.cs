@@ -23,7 +23,7 @@ internal sealed class TrayIconController : IDisposable
 
     /// <param name="notifying">Whether deployment toasts are on.</param>
     /// <param name="setNotifying">Turns them on or off, as the Notifications switch in Settings does.</param>
-    public TrayIconController(Action toggle, Action settings, Action refresh, Action quit,
+    public TrayIconController(Action toggle, Action openWindow, Action settings, Action refresh, Action quit,
         Func<bool> notifying, Action<bool> setNotifying)
     {
         _notifying = notifying;
@@ -31,6 +31,7 @@ internal sealed class TrayIconController : IDisposable
         // (The menu is drawn natively, which ignores font weight, so the default item can't be bold.)
         var menu = new MenuFlyout();
         menu.Items.Add(new MenuFlyoutItem { Text = "Open Forge", Command = new RelayCommand(toggle) });
+        menu.Items.Add(new MenuFlyoutItem { Text = "Open in a window", Command = new RelayCommand(openWindow) });
         menu.Items.Add(new MenuFlyoutItem { Text = "Refresh now", Command = new RelayCommand(refresh) });
         menu.Items.Add(new MenuFlyoutSeparator());
         _notifyItem = new ToggleMenuFlyoutItem

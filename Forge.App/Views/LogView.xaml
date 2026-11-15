@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Forge.App.Views.LogView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid RowSpacing="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="FindColumn" Width="260" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="FindBox" PlaceholderText="Find in log" TextChanged="FindBox_TextChanged"
+                     AutomationProperties.Name="Find in log" />
+            <TextBlock Grid.Column="1" x:Name="MatchText" VerticalAlignment="Center" Margin="4,0,0,0"
+                       Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <ToggleButton Grid.Column="2" x:Name="WrapButton" Click="WrapButton_Click" ToolTipService.ToolTip="Wrap long lines"
+                          AutomationProperties.Name="Wrap lines">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE751;" />
+                    <TextBlock x:Name="WrapLabel" Text="Wrap" />
+                </StackPanel>
+            </ToggleButton>
+            <Button Grid.Column="3" x:Name="ReloadButton" Click="ReloadButton_Click" ToolTipService.ToolTip="Reload (F5)"
+                    AutomationProperties.Name="Reload">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE72C;" />
+                    <TextBlock x:Name="ReloadLabel" Text="Reload" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="4" Click="CopyButton_Click" ToolTipService.ToolTip="Copy the whole log" AutomationProperties.Name="Copy">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE8C8;" />
+                    <TextBlock x:Name="CopyLabel" Text="Copy" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="5" Click="SaveButton_Click" ToolTipService.ToolTip="Save to Downloads" AutomationProperties.Name="Save to Downloads">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE896;" />
+                    <TextBlock x:Name="SaveLabel" Text="Save" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <TextBlock Grid.Row="1" x:Name="HeaderText" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}"
+                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+        <Border Grid.Row="2" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="6">
+            <Grid>
+                <ScrollViewer x:Name="Scroll" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Auto"
+                              VerticalScrollBarVisibility="Auto" IsTabStop="True">
+                    <TextBlock x:Name="LogText" FontFamily="{StaticResource MonoFont}" FontSize="12.5" LineHeight="20"
+                               IsTextSelectionEnabled="True" TextWrapping="NoWrap" Padding="14,10,16,14" />
+                </ScrollViewer>
+                <ProgressRing x:Name="Loading" IsActive="False" Width="28" Height="28" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

@@ -89,6 +89,7 @@ internal static class Palette
 
     public static Brush Transparent { get; } = new SolidColorBrush(Colors.Transparent);
     public static Brush Accent => Resource("AccentTextFillColorPrimaryBrush", Windows.UI.Color.FromArgb(255, 0, 120, 212));
+    public static Brush Primary => Resource("TextFillColorPrimaryBrush", Colors.White);
     public static Brush Secondary => Resource("TextFillColorSecondaryBrush", Colors.Gray);
     public static Brush Tertiary => Resource("TextFillColorTertiaryBrush", Colors.Gray);
 

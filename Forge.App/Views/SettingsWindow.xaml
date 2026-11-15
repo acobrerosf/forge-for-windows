@@ -144,7 +144,7 @@
                                     <TextBlock Text="Start with Windows" />
                                     <TextBlock Style="{StaticResource CardCaption}" Text="Starts in the tray, without opening the flyout" />
                                 </StackPanel>
-                                <ToggleSwitch Grid.Column="2" x:Name="StartupSwitch" MinWidth="0" VerticalAlignment="Center"
+                                <ToggleSwitch Grid.Column="2" x:Name="StartupSwitch" MinWidth="0" VerticalAlignment="Center" OnContent="On" OffContent="Off"
                                               Toggled="Setting_Changed" AutomationProperties.Name="Start with Windows" />
                             </Grid>
                         </Border>
@@ -186,7 +186,7 @@
                                     <TextBlock Text="A deployment finishes or fails" />
                                     <TextBlock Style="{StaticResource CardCaption}" Text="A toast for each one; clicking it opens the site" />
                                 </StackPanel>
-                                <ToggleSwitch Grid.Column="2" x:Name="NotifySwitch" MinWidth="0" VerticalAlignment="Center"
+                                <ToggleSwitch Grid.Column="2" x:Name="NotifySwitch" MinWidth="0" VerticalAlignment="Center" OnContent="On" OffContent="Off"
                                               Toggled="Setting_Changed" AutomationProperties.Name="Notify when a deployment finishes or fails" />
                             </Grid>
                         </Border>
