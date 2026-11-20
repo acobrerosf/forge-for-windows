@@ -14,7 +14,8 @@ namespace Forge.App.Tray;
 /// </summary>
 internal static partial class IconFactory
 {
-    private static readonly Color Slate = Color.FromArgb(255, 36, 52, 71);
+    private static readonly Color Ink = Color.FromArgb(255, 18, 23, 34);
+    private static readonly Color Steel = Color.FromArgb(255, 245, 247, 250);
     private static readonly Dictionary<(Badge, bool), Icon> Cache = new();
 
     public static Icon Get(Badge badge, bool lit)
@@ -35,22 +36,26 @@ internal static partial class IconFactory
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(Color.Transparent);
             using (var path = RoundedRect(new RectangleF(1, 1, 30, 30), 7))
-            using (var bg = new SolidBrush(Slate))
+            using (var bg = new SolidBrush(Ink))
                 g.FillPath(bg, path);
 
-            using (var white = new SolidBrush(Color.White))
+            // Three server slabs stepping down into an F. The tray leaves out the app icon's
+            // status lights: the badge is the light here, and an ember dot would read as amber.
+            using (var steel = new SolidBrush(Steel))
             {
-                g.FillRectangle(white, 9, 7, 5, 18);
-                g.FillRectangle(white, 9, 7, 14, 5);
-                g.FillRectangle(white, 9, 14, 11, 4);
+                foreach (var slab in new[] { new RectangleF(8, 8, 16, 4), new RectangleF(8, 14, 12, 4), new RectangleF(8, 20, 6, 4) })
+                {
+                    using var path = RoundedRect(slab, 1.5f);
+                    g.FillPath(steel, path);
+                }
             }
 
             if (badge != Badge.None)
             {
                 var outer = new RectangleF(17, 17, 15, 15);
                 var inner = new RectangleF(19.5f, 19.5f, 10, 10);
-                // A slate collar keeps the badge legible against the white glyph and any taskbar colour.
-                using (var collar = new SolidBrush(Slate)) g.FillEllipse(collar, outer);
+                // An ink collar keeps the badge legible against the slabs and any taskbar colour.
+                using (var collar = new SolidBrush(Ink)) g.FillEllipse(collar, outer);
                 var color = badge switch
                 {
                     Badge.Bad => Color.FromArgb(255, 239, 68, 68),
