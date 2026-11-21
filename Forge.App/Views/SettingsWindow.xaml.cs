@@ -41,9 +41,13 @@ public sealed partial class SettingsWindow : Window
         if (File.Exists(icon))
         {
             AppWindow.SetIcon(icon);
-            foreach (var image in new[] { TitleIcon, PaneIcon, AboutIcon })
-                image.Source = new BitmapImage(new Uri(icon));
+            TitleIcon.Source = new BitmapImage(new Uri(icon));
         }
+        // XAML decodes only an .ico's first (16 px) frame, which blurs when stretched; the larger marks use the PNG.
+        var mark = Path.Combine(AppContext.BaseDirectory, "Assets", "forge.png");
+        if (File.Exists(mark))
+            foreach (var image in new[] { PaneIcon, AboutIcon })
+                image.Source = new BitmapImage(new Uri(mark));
 
         var scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
         AppWindow.Resize(new SizeInt32((int)(980 * scale), (int)(720 * scale)));

@@ -1,4 +1,5 @@
-# Renders Forge.App/Assets/forge.ico (16-256 px PNG frames) with the same mark
+# Renders Forge.App/Assets/forge.ico (16-256 px PNG frames), and forge.png (the 256 px frame) for
+# the app's own Image elements, with the same mark
 # the tray icon draws at runtime (Forge.App/Tray/IconFactory.cs). Windows PowerShell 5.1.
 # The mark ("Stack"): three server slabs stepping down into an F on an ink tile, on a 32 px grid.
 # From 24 px up the top slab gets an ember status light and the middle one a dark, unlit one.
@@ -55,4 +56,8 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 }
 foreach ($f in $frames) { $bw.Write($f) }
 $bw.Dispose()
-Write-Output "Wrote $Out"
+
+# XAML's Image decodes only an .ico's first (16 px) frame, so in-app images use a PNG instead.
+$png = [System.IO.Path]::ChangeExtension($fs.Name, '.png')
+[System.IO.File]::WriteAllBytes($png, $frames[-1])
+Write-Output "Wrote $Out and $png"

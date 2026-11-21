@@ -35,5 +35,6 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="Assets\forge.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\forge.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
