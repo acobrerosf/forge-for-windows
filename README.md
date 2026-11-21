@@ -9,12 +9,18 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
 - **Flyout** (left-click the tray icon): servers and their sites, with search, organization tabs and
   chips for anything failed, deploying or in maintenance. Hover a row for Deploy and Open site, or
   right-click it for everything else. Works fully from the keyboard too.
-  - Site actions: deploy, maintenance mode, PHP-FPM reload, run a command, deployment log,
-    application and nginx logs, heartbeats, open site, open in Forge, copy ssh, open ssh in Windows Terminal.
-  - Server actions: restart nginx, PHP-FPM, supervisor, redis and the database (only the services the
-    server type runs), reboot, events, recipes, monitors.
+  - Site: deploy, maintenance mode, PHP-FPM reload, run a command, heartbeats, open site, open in Forge,
+    copy ssh, open ssh in Windows Terminal, and three sections: **Deployments** (every deployment and its log),
+    **Logs** (application, nginx error, nginx access; clear them too) and **Scheduled jobs** (with the last run's output).
+  - Server: restart nginx, PHP-FPM, supervisor, redis and the database (only the services the server type
+    runs), reboot, recipes, monitors, and four sections: **Events**, **Logs** (nginx, PHP, database, redis,
+    ssh… only the ones the server can have; clear them too), **Background processes** (status and log;
+    restart one) and **Scheduled jobs**.
 - **Window** (the flyout's ⧉ button, Ctrl+O, or the tray menu): the same servers and sites with room to read.
-  A site's logs open in tabs with find, wrap, copy and save; a server's events sit beside their output.
+  Each section is one tab laid out the same way: the list on the left, and beside it the output of the
+  chosen item, with find, wrap, copy and save. A tab opens on its first item (the newest deployment or
+  event), so there is always something to read.
+- **Nothing extra on the poll.** History, logs, processes and jobs are read only when you open them.
 - **Toasts** when a deployment finishes or fails, with Open site, View log and Open in Forge buttons.
 - **Every write asks first** in a small dialog. Cancel has the focus, so Enter and Esc both drop it;
   only the dialog's own button, or a capital **Y**, sends it.
@@ -34,9 +40,10 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
 | `m` | maintenance mode, on a site's page (asks first) |
 | `Y` | confirm what a dialog asks |
 | `o` / `f` / `s` / `t` | open site / open in Forge / copy ssh / ssh in Windows Terminal |
-| `e` | server events |
+| `e` | the server's events |
 | `r` | refresh (or reload the open log) |
 | `c` / `w` | in a log: copy / save to Downloads |
+| `x` | in a site or server log: clear it; in a process's log: restart the process (asks first) |
 | `,` | settings |
 | `?` | these keys |
 
@@ -85,8 +92,11 @@ from the Actions tab builds the same files as a downloadable artifact, without m
 ## Setup
 
 1. Create a token at <https://forge.laravel.com/profile/api>. Read access to servers and sites is enough
-   to watch them. Each write scope is opt-in: `site:manage-deploys`, `server:manage-services`,
-   `site:manage-commands`, `server:manage-logs`, `recipe:view` and `recipe:manage`.
+   to watch them, and to list deployments, background processes and scheduled jobs and read a job's output.
+   Each write scope is opt-in: `site:manage-deploys` (deploy, read deployment logs), `server:manage-services`,
+   `site:manage-commands`, `server:manage-logs` (read and clear site and server logs),
+   `server:create-daemons` (read a background process's log and restart it), `recipe:view` and `recipe:manage`.
+   A view whose scope is missing says which one it needs.
 2. Start the app. On first run Settings opens. Paste the token, press **Check token**, pick the
    organizations to watch, then press **Save account**.
 

@@ -229,6 +229,74 @@ public static partial class Parse
             .ThenBy(h => h.Name, ForgeText.Collation)
             .ToList();
 
+    /// <summary>Kept in Forge's order (newest first, as asked for); a row with no id cannot open its log and is dropped.</summary>
+    public static List<Deployment> Deployments(JsonNode? body) =>
+        Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                var commit = Json.Get(a, "commit");
+                var hash = Json.Str(Json.Get(commit, "hash"));
+                return new Deployment
+                {
+                    Id = Json.Str(Json.Get(r, "id")),
+                    Status = Json.Str(Json.Get(a, "status")),
+                    Type = Json.Str(Json.Get(a, "type")),
+                    CommitHash = hash.Length > 7 ? hash[..7] : hash,
+                    CommitMessage = Json.Str(Json.Get(commit, "message")).Split('\n')[0].Trim(),
+                    CommitAuthor = Json.Str(Json.Get(commit, "author")),
+                    Branch = Json.Str(Json.Get(commit, "branch")),
+                    StartedAt = Json.Str(Json.Get(a, "started_at")),
+                    EndedAt = Json.Str(Json.Get(a, "ended_at")),
+                    CreatedAt = Json.Str(Json.Get(a, "created_at")),
+                };
+            })
+            .Where(d => d.Id != "")
+            .ToList();
+
+    /// <summary>Broken ones first, so a stopped or failed process is at the top of the list.</summary>
+    public static List<BackgroundProcess> BackgroundProcesses(JsonNode? body) =>
+        Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                return new BackgroundProcess
+                {
+                    Id = Json.Str(Json.Get(r, "id")),
+                    Command = Json.Str(Json.Get(a, "command")),
+                    User = Json.Str(Json.Get(a, "user")),
+                    Directory = Json.Str(Json.Get(a, "directory")),
+                    Processes = (int)Json.Num(Json.Get(a, "processes")),
+                    Status = Json.Str(Json.Get(a, "status")),
+                };
+            })
+            .Where(p => p.Id != "")
+            .OrderBy(Status.ProcessRank)
+            .ThenBy(p => p.Command, ForgeText.Collation)
+            .ToList();
+
+    public static List<ScheduledJob> ScheduledJobs(JsonNode? body) =>
+        Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                return new ScheduledJob
+                {
+                    Id = Json.Str(Json.Get(r, "id")),
+                    Name = Json.Str(Json.Get(a, "name")),
+                    Command = Json.Str(Json.Get(a, "command")),
+                    User = Json.Str(Json.Get(a, "user")),
+                    Frequency = Json.Str(Json.Get(a, "frequency")),
+                    Cron = Json.Str(Json.Get(a, "cron")),
+                    NextRunTime = Json.Str(Json.Get(a, "next_run_time")),
+                    Status = Json.Str(Json.Get(a, "status")),
+                };
+            })
+            .Where(j => j.Id != "")
+            .OrderBy(Status.ScheduledJobRank)
+            .ThenBy(Status.ScheduledJobTitle, ForgeText.Collation)
+            .ToList();
+
     public static List<Organization> Organizations(JsonNode? body) =>
         Json.Items(body, "data")
             .Select(r =>

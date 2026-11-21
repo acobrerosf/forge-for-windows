@@ -92,7 +92,7 @@
                             </Expander.Header>
                             <StackPanel Spacing="12" Padding="48,4,0,8" MaxWidth="640" HorizontalAlignment="Left">
                                 <TextBlock Style="{StaticResource CardCaption}"
-                                           Text="Read access to servers and sites is enough to watch them. Each write needs its own scope: site:manage-deploys to deploy and read deploy logs, server:manage-services to restart services and reboot, site:manage-commands for maintenance mode and commands, server:manage-logs for site logs, recipe:view and recipe:manage for recipes." />
+                                           Text="Read access to servers and sites is enough to watch them. Each write needs its own scope: site:manage-deploys to deploy and read deploy logs, server:manage-services to restart services and reboot, site:manage-commands for maintenance mode and commands, server:manage-logs to read and clear site and server logs, server:create-daemons to read and restart background processes, recipe:view and recipe:manage for recipes." />
                                 <HyperlinkButton x:Name="TokenLink" Content="Create a token at forge.laravel.com/profile/api" Padding="0" Click="TokenLink_Click" />
                                 <TextBox x:Name="AccountNameBox" Header="Account name (optional)" PlaceholderText="work" MaxWidth="360" HorizontalAlignment="Left" Width="360" />
                                 <PasswordBox x:Name="TokenBox" Header="API token" />

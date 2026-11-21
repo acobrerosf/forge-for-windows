@@ -83,12 +83,35 @@ public sealed partial class ForgeWindow : Window
         TitleBarArea.SizeChanged += (_, _) => UpdateTitleBarRegions();
         Root.Loaded += (_, _) => UpdateTitleBarRegions();
 
-        SiteLog.ReloadRequested += LoadSiteTab;
-        SiteLog.Reported += Flash;
-        EventLog.ReloadRequested += () => { if (EventList.SelectedItem is ListEntry { Payload: ForgeEvent ev }) LoadEventOutput(ev); };
-        EventLog.Reported += Flash;
         CommandOutput.CanReload = false;
         CommandOutput.Reported += Flash;
+
+        // Every list-and-output section works the same way: a fresh read opens an item, picking one
+        // reads its output, Reload re-reads the output, "Load more" pages on.
+        SiteDeployments.Picked += e => { if (e.Payload is Deployment d) LoadDeploymentLog(d); };
+        SiteDeployments.ListReloadRequested += () => LoadDeployments(null);
+        SiteDeployments.MoreRequested += () => LoadDeployments(SiteDeployments.Next);
+        SiteLogs.Picked += e => { if (e.Payload is string kind) LoadSiteLog(kind); };
+        SiteLogs.ListReloadRequested += LoadSiteLogKinds;
+        SiteLogs.Log.ClearRequested += ClearSiteLog;
+        SiteJobs.Picked += e => { if (e.Payload is ScheduledJob j) LoadJobOutput(SiteJobs, j, site: true); };
+        SiteJobs.ListReloadRequested += () => LoadJobs(SiteJobs, null, site: true);
+        SiteJobs.MoreRequested += () => LoadJobs(SiteJobs, SiteJobs.Next, site: true);
+        ServerEvents.Picked += e => { if (e.Payload is ForgeEvent ev) LoadEventOutput(ev); };
+        ServerEvents.ListReloadRequested += () => LoadEvents(null);
+        ServerEvents.MoreRequested += () => LoadEvents(ServerEvents.Next);
+        ServerLogs.Picked += e => { if (e.Payload is string key) LoadServerLog(key); };
+        ServerLogs.ListReloadRequested += LoadServerLogKinds;
+        ServerLogs.Log.ClearRequested += ClearServerLog;
+        ServerProcesses.Picked += e => { if (e.Payload is BackgroundProcess p) LoadProcessLog(p); };
+        ServerProcesses.ListReloadRequested += () => LoadProcesses(null);
+        ServerProcesses.MoreRequested += () => LoadProcesses(ServerProcesses.Next);
+        ServerProcesses.ActionRequested += RestartProcess;
+        ServerJobs.Picked += e => { if (e.Payload is ScheduledJob j) LoadJobOutput(ServerJobs, j, site: false); };
+        ServerJobs.ListReloadRequested += () => LoadJobs(ServerJobs, null, site: false);
+        ServerJobs.MoreRequested += () => LoadJobs(ServerJobs, ServerJobs.Next, site: false);
+        foreach (var pane in new[] { SiteDeployments, SiteLogs, SiteJobs, ServerEvents, ServerLogs, ServerProcesses, ServerJobs })
+            pane.Log.Reported += Flash;
 
         _flashTimer = DispatcherQueue.CreateTimer();
         _flashTimer.Interval = TimeSpan.FromSeconds(6);
@@ -330,10 +353,12 @@ public sealed partial class ForgeWindow : Window
         CommandOutput.Clear();
         CommandOutput.Visibility = Visibility.Collapsed;
         CommandBox.Text = "";
-        SiteLog.Clear();
+        SiteLogs.Reset();
+        SiteDeployments.Reset();
+        SiteJobs.Reset();
         _followTone = null;
         // A site with a failed deploy opens on the log that says why.
-        _siteTab = Status.SiteTone(CurrentSite()) == Tone.Bad ? "log" : "overview";
+        _siteTab = Status.SiteTone(CurrentSite()) == Tone.Bad ? "deployments" : "overview";
         _syncing = true;
         SiteTabs.SelectedItem = SiteTabs.Items.First(i => (string)i.Tag == _siteTab);
         _syncing = false;
@@ -406,7 +431,9 @@ public sealed partial class ForgeWindow : Window
         ToolTipService.SetToolTip(PhpReloadButton, php.Available ? null : Capitalize(php.Reason));
 
         OverviewPanel.Visibility = _siteTab == "overview" ? Visibility.Visible : Visibility.Collapsed;
-        SiteLog.Visibility = _siteTab is "log" or "application" or "nginx-error" or "nginx-access" ? Visibility.Visible : Visibility.Collapsed;
+        SiteLogs.Visibility = _siteTab == "logs" ? Visibility.Visible : Visibility.Collapsed;
+        SiteDeployments.Visibility = _siteTab == "deployments" ? Visibility.Visible : Visibility.Collapsed;
+        SiteJobs.Visibility = _siteTab == "schedule" ? Visibility.Visible : Visibility.Collapsed;
         HeartbeatsPanel.Visibility = _siteTab == "heartbeats" ? Visibility.Visible : Visibility.Collapsed;
         CommandPanel.Visibility = _siteTab == "command" ? Visibility.Visible : Visibility.Collapsed;
         RunButton.IsEnabled = CommandBox.Text.Trim() != "" && !_sending;
@@ -452,6 +479,13 @@ public sealed partial class ForgeWindow : Window
         LoadSiteTab();
     }
 
+    /// <summary>Deployments, on the newest one whatever was being read before: after a deploy, or from the failed-deploy banner.</summary>
+    private void ShowLatestDeployment()
+    {
+        SiteDeployments.Reset();
+        ShowSiteTab("deployments");
+    }
+
     private void ShowSiteTab(string tab)
     {
         _siteTab = tab;
@@ -471,35 +505,15 @@ public sealed partial class ForgeWindow : Window
         _logLoadedMs = NowMs;
         switch (_siteTab)
         {
-            case "log":
-            {
-                if (site.DeploymentId == "")
-                {
-                    SiteLog.Show([], "", "forge.log", "This site has never been deployed");
-                    return;
-                }
-                SiteLog.ShowLoading();
-                var result = await _service.DeploymentLogAsync(org, site);
-                if (gen != _loadGen) return;
-                var st = Status.SiteStatus(site);
-                if (result.Ok)
-                    SiteLog.Show(result.Value!, Capitalize(st.Label) + (site.CommitHash == "" ? "" : " · " + site.CommitHash),
-                        $"forge-{ForgeText.SafeFileName(site.Name)}-{ForgeText.SafeFileName(site.DeploymentId)}.log",
-                        "The deployment printed nothing", st.Tone == Tone.Bad);
-                else SiteLog.ShowError(result.Error ?? "Could not read the log");
+            case "deployments":
+                LoadDeployments(null);
                 break;
-            }
-            case "application" or "nginx-error" or "nginx-access":
-            {
-                var kind = _siteTab;
-                SiteLog.ShowLoading();
-                var result = await _service.SiteLogAsync(org, site, kind);
-                if (gen != _loadGen) return;
-                if (result.Ok)
-                    SiteLog.Show(result.Value!, "", $"forge-{ForgeText.SafeFileName(site.Name)}-{ForgeText.SafeFileName(kind)}.log", "The log is empty");
-                else SiteLog.ShowError(result.Error ?? "Could not read the log");
+            case "schedule":
+                LoadJobs(SiteJobs, null, site: true);
                 break;
-            }
+            case "logs":
+                LoadSiteLogKinds();
+                break;
             case "heartbeats":
             {
                 HeartbeatsText.Text = "Loading…";
@@ -523,17 +537,246 @@ public sealed partial class ForgeWindow : Window
         }
     }
 
-    /// <summary>While a deploy runs and its log is open, read it again as the service's checks come in, and once more when it ends.</summary>
+
+    // ------------------------------------------- lists beside their output
+
+    /// <summary>
+    /// The history, newest first, opened on the latest deployment's log. A reload keeps an older
+    /// deployment the reader chose; one who was reading the latest moves on to the new latest.
+    /// </summary>
+    private async void LoadDeployments(string? cursor)
+    {
+        if (CurrentSite() is not { } site) return;
+        var org = _org;
+        var gen = ++_loadGen;
+        SiteDeployments.BeginList(cursor is not null, "Loading the site's deployments…");
+        var result = await _service.DeploymentsAsync(org, site, cursor);
+        if (gen != _loadGen) return;
+        if (!result.Ok) { SiteDeployments.ShowListError(result.Error ?? "Could not read the deployments"); return; }
+        var now = NowMs;
+        SiteDeployments.ShowList(result.Value!.Select(d => new ListEntry
+        {
+            Key = d.Id,
+            Title = d.CommitMessage != "" ? d.CommitMessage : "Deployment " + d.Id,
+            Detail = Status.DeploymentDetail(d),
+            Status = Capitalize(Status.DeploymentLabel(d.Status)),
+            Time = ForgeText.RelativeTime(Status.DeploymentTime(d), now),
+            Tone = Status.DeploymentTone(d.Status), Payload = d,
+        }), cursor is not null, result.NextCursor, "This site has never been deployed");
+    }
+
+    private async void LoadDeploymentLog(Deployment d)
+    {
+        if (CurrentSite() is not { } site) return;
+        var org = _org;
+        var gen = ++_loadGen;
+        _logLoadedMs = NowMs;
+        // The latest deployment's row was read with the list; the site's status is the live one.
+        var latest = d.Id == site.DeploymentId;
+        var label = latest ? Status.SiteStatus(site).Label : Status.DeploymentLabel(d.Status);
+        var bad = latest ? Status.SiteTone(site) == Tone.Bad : Status.DeploymentTone(d.Status) == Tone.Bad;
+        var header = Capitalize(label) + (d.CommitHash == "" ? "" : " · " + d.CommitHash);
+        SiteDeployments.Log.ShowLoading(header);
+        var result = await _service.DeploymentLogAsync(org, site, d.Id);
+        if (gen != _loadGen) return;
+        if (result.Ok)
+            SiteDeployments.Log.Show(result.Value!, header,
+                $"forge-{ForgeText.SafeFileName(site.Name)}-{ForgeText.SafeFileName(d.Id)}.log",
+                "The deployment printed nothing", bad);
+        else SiteDeployments.Log.ShowError(result.Error ?? "Could not read the log");
+    }
+
+    /// <summary>A site's jobs or its server's; both lists and their outputs read the same way.</summary>
+    private async void LoadJobs(ListLogPane pane, string? cursor, bool site)
+    {
+        var current = site ? CurrentSite() : null;
+        if (CurrentServer() is not { } server || (site && current is null)) return;
+        var org = _org;
+        var gen = ++_loadGen;
+        pane.BeginList(cursor is not null, "Loading the scheduled jobs…");
+        var result = await _service.ScheduledJobsAsync(org, server.Id, current, cursor);
+        if (gen != _loadGen) return;
+        if (!result.Ok) { pane.ShowListError(result.Error ?? "Could not read the scheduled jobs"); return; }
+        var now = NowMs;
+        pane.ShowList(result.Value!.Select(j =>
+        {
+            var (label, tone) = Status.ScheduledJobStatus(j);
+            return new ListEntry
+            {
+                Key = j.Id, Title = Status.ScheduledJobTitle(j), Detail = Status.ScheduledJobDetail(j),
+                Status = Capitalize(label),
+                Time = Status.ScheduledJobNext(j, now),
+                Tone = tone, Payload = j,
+            };
+        }), cursor is not null, result.NextCursor,
+            site ? "This site has no scheduled jobs" : "This server has no scheduled jobs");
+    }
+
+    private async void LoadJobOutput(ListLogPane pane, ScheduledJob job, bool site)
+    {
+        var current = site ? CurrentSite() : null;
+        if (CurrentServer() is not { } server || (site && current is null)) return;
+        var org = _org;
+        var gen = ++_loadGen;
+        var title = Status.ScheduledJobTitle(job);
+        pane.Log.ShowLoading(title);
+        var result = await _service.ScheduledJobOutputAsync(org, server.Id, current, job.Id);
+        if (gen != _loadGen) return;
+        if (result.Ok)
+            pane.Log.Show(result.Value!, title,
+                $"forge-{ForgeText.SafeFileName(current?.Name ?? server.Name)}-cron-{ForgeText.SafeFileName(job.Id)}.log",
+                "The last run printed nothing");
+        else pane.Log.ShowError(result.Error ?? "Could not read the job's output");
+    }
+
+    /// <summary>A site's three logs: the list is known without asking, so only the opened log costs a request.</summary>
+    private void LoadSiteLogKinds()
+    {
+        if (CurrentSite() is null) return;
+        ++_loadGen;
+        SiteLogs.BeginList(false, "");
+        SiteLogs.ShowList(Actions.SiteLogKinds.Select(k => new ListEntry
+        {
+            Key = k.Kind, Title = k.Label, Detail = k.Kind, Payload = k.Kind,
+        }), false, "", "This site has no logs to read");
+    }
+
+    private async void LoadSiteLog(string kind)
+    {
+        if (CurrentSite() is not { } site) return;
+        var org = _org;
+        var gen = ++_loadGen;
+        SiteLogs.Log.CanClear = true;
+        SiteLogs.Log.ShowLoading(Actions.SiteLogLabel(kind));
+        var result = await _service.SiteLogAsync(org, site, kind);
+        if (gen != _loadGen) return;
+        if (result.Ok)
+            SiteLogs.Log.Show(result.Value!, Actions.SiteLogLabel(kind),
+                $"forge-{ForgeText.SafeFileName(site.Name)}-{ForgeText.SafeFileName(kind)}.log", "The log is empty");
+        else SiteLogs.Log.ShowError(result.Error ?? "Could not read the log");
+    }
+
+    /// <summary>The logs this server can have, from what it already reports: only the opened log costs a request.</summary>
+    private void LoadServerLogKinds()
+    {
+        if (CurrentServer() is not { } server) return;
+        ++_loadGen;
+        ServerLogs.BeginList(false, "");
+        ServerLogs.ShowList(Actions.ServerLogKinds(server).Select(k => new ListEntry
+        {
+            Key = k.Key, Title = k.Label, Detail = k.Key, Payload = k.Key,
+        }), false, "", "This server has no logs to read");
+    }
+
+    private async void LoadServerLog(string key)
+    {
+        if (CurrentServer() is not { } server) return;
+        var org = _org;
+        var gen = ++_loadGen;
+        ServerLogs.Log.CanClear = true;
+        ServerLogs.Log.ShowLoading(Actions.ServerLogLabel(key));
+        var result = await _service.ServerLogAsync(org, server.Id, key);
+        if (gen != _loadGen) return;
+        if (result.Ok)
+            ServerLogs.Log.Show(result.Value!, Actions.ServerLogLabel(key),
+                $"forge-{ForgeText.SafeFileName(server.Name)}-{ForgeText.SafeFileName(key)}.log", "The log is empty");
+        else ServerLogs.Log.ShowError(result.Error ?? "Could not read the log");
+    }
+
+    private async void LoadProcesses(string? cursor)
+    {
+        if (CurrentServer() is not { } server) return;
+        var org = _org;
+        var gen = ++_loadGen;
+        ServerProcesses.BeginList(cursor is not null, "Loading the background processes…");
+        var result = await _service.BackgroundProcessesAsync(org, server.Id, cursor);
+        if (gen != _loadGen) return;
+        if (!result.Ok) { ServerProcesses.ShowListError(result.Error ?? "Could not read the background processes"); return; }
+        ServerProcesses.ShowList(result.Value!.Select(p =>
+        {
+            var (label, tone) = Status.ProcessStatus(p);
+            return new ListEntry
+            {
+                Key = p.Id, Title = p.Command == "" ? "Process " + p.Id : p.Command, Detail = Status.ProcessDetail(p),
+                Status = Capitalize(label), Tone = tone, Payload = p,
+            };
+        }), cursor is not null, result.NextCursor, "This server runs no background processes");
+    }
+
+    private async void LoadProcessLog(BackgroundProcess p)
+    {
+        if (CurrentServer() is not { } server) return;
+        var org = _org;
+        var gen = ++_loadGen;
+        var restart = Actions.ProcessRestart(org, server, p);
+        ServerProcesses.SetAction("Restart", restart.Available && !_sending,
+            restart.Available ? "Restart asks before it sends" : "Can't restart now: " + restart.Reason);
+        var header = Capitalize(Status.ProcessStatus(p).Label) + " · " + p.Command;
+        ServerProcesses.Log.ShowLoading(header);
+        var result = await _service.BackgroundProcessLogAsync(org, server.Id, p.Id);
+        if (gen != _loadGen) return;
+        if (result.Ok)
+            ServerProcesses.Log.Show(result.Value!, header,
+                $"forge-{ForgeText.SafeFileName(server.Name)}-process-{ForgeText.SafeFileName(p.Id)}.log",
+                "The process has logged nothing", Status.ProcessStatus(p).Tone == Tone.Bad);
+        else ServerProcesses.Log.ShowError(result.Error ?? "Could not read the process's log");
+    }
+
+    // ------------------------------------------------- clearing, restarting
+
+    private void ClearSiteLog()
+    {
+        if (CurrentSite() is not { } site || SiteLogs.Selected is not { Payload: string kind }) return;
+        var org = _org;
+        var key = site.Key;
+        SendAction(org, site.ServerId, Actions.ClearSiteLog(org, site, kind), site.Name,
+            () => _siteKey == key && SiteLogs.Selected is { Payload: string now } && now == kind
+                ? Actions.ClearSiteLog(org, _service.Snapshot.Org(org)?.SiteByKey(key), kind) : null,
+            () => { if (_org == org && _siteKey == key && _siteTab == "logs") LoadSiteLog(kind); });
+    }
+
+    private void ClearServerLog()
+    {
+        if (CurrentServer() is not { } server || ServerLogs.Selected is not { Payload: string logKey }) return;
+        var org = _org;
+        var id = server.Id;
+        SendAction(org, id, Actions.ClearServerLog(org, server, logKey), server.Name,
+            () => ServerLogs.Selected is { Payload: string now } && now == logKey
+                ? Actions.ClearServerLog(org, _service.Snapshot.Org(org)?.ServerById(id), logKey) : null,
+            () => { if (_org == org && _serverId == id && _serverTab == "logs") LoadServerLog(logKey); });
+    }
+
+    private void RestartProcess()
+    {
+        if (CurrentServer() is not { } server || ServerProcesses.Selected is not { Payload: BackgroundProcess p }) return;
+        var org = _org;
+        var id = server.Id;
+        SendAction(org, id, Actions.ProcessRestart(org, server, p), server.Name,
+            () => ServerProcesses.Selected is { Payload: BackgroundProcess now } && now.Id == p.Id
+                ? Actions.ProcessRestart(org, _service.Snapshot.Org(org)?.ServerById(id), now) : null,
+            () => { if (_org == org && _serverId == id && _serverTab == "processes") LoadProcesses(null); });
+    }
+
+    /// <summary>
+    /// While a deploy runs and the latest deployment's log is open, read it again as the service's
+    /// checks come in. When the site reports a deployment the list doesn't have yet, or the deploy
+    /// ends, read the list again too, which moves the reader on to the newest one.
+    /// </summary>
     private void FollowDeployLog()
     {
         var site = CurrentSite();
         var tone = Status.SiteTone(site);
         var was = _followTone;
         _followTone = tone;
-        if (site is null || _siteTab != "log") return;
-        var ended = was == Tone.Busy && tone != Tone.Busy;
-        var running = tone == Tone.Busy && NowMs - _logLoadedMs > 12_000;
-        if (ended || running) LoadSiteTab();
+        if (site is null || _siteTab != "deployments") return;
+        var onLatest = SiteDeployments.Selected is null || SiteDeployments.Selected.Key == SiteDeployments.FirstKey;
+        if (!onLatest) return;
+        if (was == Tone.Busy && tone != Tone.Busy) { LoadDeployments(null); return; }
+        // Only while a deploy runs, and no faster than the service checks: outside one, nothing here costs a request.
+        if (tone != Tone.Busy || NowMs - _logLoadedMs <= 12_000) return;
+        var newer = site.DeploymentId != "" && site.DeploymentId != SiteDeployments.FirstKey;
+        if (newer) { _logLoadedMs = NowMs; LoadDeployments(null); }
+        else if (SiteDeployments.Selected is { Payload: Deployment d }) LoadDeploymentLog(d);
     }
 
     // --------------------------------------------------------------- server
@@ -548,8 +791,10 @@ public sealed partial class ForgeWindow : Window
         _syncing = true;
         ServerTabs.SelectedItem = ServerTabs.Items[0];
         _syncing = false;
-        EventList.ItemsSource = null;
-        EventLog.Clear();
+        ServerEvents.Reset();
+        ServerLogs.Reset();
+        ServerProcesses.Reset();
+        ServerJobs.Reset();
         Render();
     }
 
@@ -567,7 +812,10 @@ public sealed partial class ForgeWindow : Window
         }.Where(s => s != ""));
 
         ServicesPanel.Visibility = _serverTab == "services" ? Visibility.Visible : Visibility.Collapsed;
-        EventsPanel.Visibility = _serverTab == "events" ? Visibility.Visible : Visibility.Collapsed;
+        ServerEvents.Visibility = _serverTab == "events" ? Visibility.Visible : Visibility.Collapsed;
+        ServerLogs.Visibility = _serverTab == "logs" ? Visibility.Visible : Visibility.Collapsed;
+        ServerProcesses.Visibility = _serverTab == "processes" ? Visibility.Visible : Visibility.Collapsed;
+        ServerJobs.Visibility = _serverTab == "schedule" ? Visibility.Visible : Visibility.Collapsed;
         if (_serverTab == "services") RenderServices(server);
     }
 
@@ -636,37 +884,37 @@ public sealed partial class ForgeWindow : Window
         if (_syncing) return;
         _serverTab = sender.SelectedItem?.Tag as string ?? "services";
         RenderPage();
-        if (_serverTab == "events") LoadEvents();
+        LoadServerTab();
     }
 
-    private async void LoadEvents()
+    /// <summary>Reads what the open server tab shows — on demand, never on the poll.</summary>
+    private void LoadServerTab()
+    {
+        switch (_serverTab)
+        {
+            case "events": LoadEvents(null); break;
+            case "logs": LoadServerLogKinds(); break;
+            case "processes": LoadProcesses(null); break;
+            case "schedule": LoadJobs(ServerJobs, null, site: false); break;
+        }
+    }
+
+    private async void LoadEvents(string? cursor)
     {
         if (CurrentServer() is not { } server) return;
         var org = _org;
         var gen = ++_loadGen;
-        EventList.ItemsSource = null;
-        EventLog.Show([], "", "forge.log", "Loading the server's events…");
-        var result = await _service.EventsAsync(org, server.Id);
+        ServerEvents.BeginList(cursor is not null, "Loading the server's events…");
+        var result = await _service.EventsAsync(org, server.Id, cursor);
         if (gen != _loadGen) return;
-        if (!result.Ok)
-        {
-            EventLog.ShowError(result.Error ?? "Could not read the events");
-            return;
-        }
+        if (!result.Ok) { ServerEvents.ShowListError(result.Error ?? "Could not read the events"); return; }
         var now = NowMs;
-        var events = result.Value!;
-        EventList.ItemsSource = events.Select(e => new ListEntry
+        ServerEvents.ShowList(result.Value!.Select(e => new ListEntry
         {
             Key = e.Id, Title = e.Description,
             Detail = string.Join(" · ", new[] { e.SiteName, e.RanAs == "" ? "" : "as " + e.RanAs }.Where(s => s != "")),
             Time = ForgeText.RelativeTime(e.CreatedAt, now), Tone = Tone.Idle, Payload = e,
-        }).ToList();
-        EventLog.Show([], "", "forge.log", events.Count == 0 ? "No events on this server" : "Pick an event to see what it printed");
-    }
-
-    private void EventList_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (EventList.SelectedItem is ListEntry { Payload: ForgeEvent ev }) LoadEventOutput(ev);
+        }), cursor is not null, result.NextCursor, "No events on this server");
     }
 
     private async void LoadEventOutput(ForgeEvent ev)
@@ -674,13 +922,13 @@ public sealed partial class ForgeWindow : Window
         if (CurrentServer() is not { } server) return;
         var org = _org;
         var gen = ++_loadGen;
-        EventLog.ShowLoading(ev.Description);
+        ServerEvents.Log.ShowLoading(ev.Description);
         var result = await _service.EventOutputAsync(org, server.Id, ev.Id);
         if (gen != _loadGen) return;
         if (result.Ok)
-            EventLog.Show(result.Value!, ev.Description, $"forge-{ForgeText.SafeFileName(server.Name)}-event-{ForgeText.SafeFileName(ev.Id)}.log",
+            ServerEvents.Log.Show(result.Value!, ev.Description, $"forge-{ForgeText.SafeFileName(server.Name)}-event-{ForgeText.SafeFileName(ev.Id)}.log",
                 "The event printed nothing");
-        else EventLog.ShowError(result.Error ?? "Could not read the event's output");
+        else ServerEvents.Log.ShowError(result.Error ?? "Could not read the event's output");
     }
 
     // --------------------------------------------------------------- writes
@@ -689,7 +937,7 @@ public sealed partial class ForgeWindow : Window
     /// Asks, then sends — but only if what was asked about still holds: a refresh
     /// that lands while the dialog is up can change what the action means.
     /// </summary>
-    private async void SendAction(string org, string serverId, ActionSpec spec, string subject, Func<ActionSpec?> fresh)
+    private async void SendAction(string org, string serverId, ActionSpec spec, string subject, Func<ActionSpec?> fresh, Action? done = null)
     {
         if (!spec.Available) { Flash(Capitalize(spec.Reason)); return; }
         var (title, body, cta) = WriteConfirm.Wording(spec, subject);
@@ -710,6 +958,7 @@ public sealed partial class ForgeWindow : Window
         {
             var outcome = await _service.SendActionAsync(org, serverId, now);
             Flash(outcome.Message, !outcome.Ok);
+            if (outcome.Ok && !_closed) done?.Invoke();
         }
         catch (Exception e)
         {
@@ -746,7 +995,7 @@ public sealed partial class ForgeWindow : Window
         {
             var outcome = await _service.DeployAsync(org, latest);
             Flash(outcome.Ok ? $"{site.Name}: {outcome.Message}" : outcome.Message, !outcome.Ok);
-            if (outcome.Ok && _org == org && _siteKey == key) ShowSiteTab("log");
+            if (outcome.Ok && _org == org && _siteKey == key) ShowLatestDeployment();
         }
         catch (Exception ex)
         {
@@ -883,7 +1132,7 @@ public sealed partial class ForgeWindow : Window
         if (CurrentSite() is { } site) SelectServer(_org, site.ServerId);
     }
 
-    private void SiteInfoLink_Click(object sender, RoutedEventArgs e) => ShowSiteTab("log");
+    private void SiteInfoLink_Click(object sender, RoutedEventArgs e) => ShowLatestDeployment();
 
     private void RunCommandTab_Click(object sender, RoutedEventArgs e)
     {
@@ -957,7 +1206,7 @@ public sealed partial class ForgeWindow : Window
     private void Reload()
     {
         if (CurrentSite() is not null && _siteTab is not ("overview" or "command")) LoadSiteTab();
-        else if (CurrentSite() is null && CurrentServer() is not null && _serverTab == "events") LoadEvents();
+        else if (CurrentSite() is null && CurrentServer() is not null) LoadServerTab();
         _service.RefreshNow();
         UpdatedText.Text = "Refreshing…";
     }

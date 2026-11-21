@@ -1,0 +1,7 @@
+{
+  "data": [
+    { "id": 21, "type": "scheduledJobs", "attributes": { "name": "", "command": "php /home/forge/zeta/artisan schedule:run", "user": "forge", "frequency": "minutely", "cron": "* * * * *", "next_run_time": "2026-11-21T10:01:00Z", "status": "installed" } },
+    { "id": 22, "type": "scheduledJobs", "attributes": { "name": "Backups", "command": "/usr/local/bin/backup", "user": "root", "frequency": "custom", "cron": "15 3 * * *", "next_run_time": "2026-11-22T03:15:00Z", "status": "failed" } }
+  ],
+  "meta": { "next_cursor": null }
+}

@@ -103,6 +103,7 @@ public sealed partial class PanelWindow : Window
         ("e", "Server events"),
         ("r", "Refresh, or reload the open log"),
         ("c  w", "In a log: copy · save to Downloads"),
+        ("x", "In a log: clear it · on a process: restart (asks first)"),
         (",", "Settings"),
     ];
 
@@ -413,6 +414,8 @@ public sealed partial class PanelWindow : Window
         ["ssh-terminal"] = "", ["nginx-restart"] = "", ["php-reload"] = "", ["php-restart"] = "",
         ["supervisor-restart"] = "", ["redis-restart"] = "", ["database-restart"] = "",
         ["reboot"] = "", ["events"] = "", ["recipes"] = "", ["monitors"] = "",
+        ["deployments"] = "", ["processes"] = "", ["schedule"] = "", ["site-schedule"] = "",
+        ["site-logs"] = "", ["server-logs"] = "",
     };
 
     private static string GlyphFor(ActionSpec a) =>
@@ -423,18 +426,17 @@ public sealed partial class PanelWindow : Window
     {
         // Drawn as the page's buttons and switch instead.
         "deploy" or "open" or "maintenance" => "",
-        "log" => "Logs",
-        _ when a.Log != "" => "Logs",
+        "deployments" or "site-logs" or "site-schedule" or "events" or "server-logs" or "processes" or "schedule" => "Activity",
         "command" or "site-php-reload" or "heartbeats" => "Tools",
         "forge" or "ssh" or "ssh-terminal" => "Connect",
-        "reboot" or "events" or "recipes" or "monitors" => "Server",
+        "reboot" or "recipes" or "monitors" => "Server",
         _ => "Services",
     };
 
     private List<RowItem> Sectioned(IEnumerable<RowItem> rows)
     {
         var list = new List<RowItem>();
-        string[] order = ["Logs", "Tools", "Services", "Server", "Connect"];
+        string[] order = ["Activity", "Tools", "Services", "Server", "Connect"];
         foreach (var group in rows.GroupBy(r => SectionOf((ActionSpec)r.Payload!)).Where(g => g.Key != "")
                      .OrderBy(g => Array.IndexOf(order, g.Key)))
         {
@@ -757,9 +759,15 @@ public sealed partial class PanelWindow : Window
         var site = nav.SiteKey == "" ? null : org?.SiteByKey(nav.SiteKey);
         var (title, empty) = nav.Kind switch
         {
-            ListKind.Events => ("Server events", "No events"),
+            ListKind.Events => ("Events", "No events"),
             ListKind.Recipes => ("Run a recipe", "This organization has no recipes"),
             ListKind.Monitors => ("Monitors", "No monitors on this server"),
+            ListKind.Deployments => ("Deployment history", "This site has no deployments"),
+            ListKind.Processes => ("Background processes", "This server runs no background processes"),
+            ListKind.ServerJobs => ("Scheduled jobs", "This server has no scheduled jobs"),
+            ListKind.SiteJobs => ("Scheduled jobs", "This site has no scheduled jobs"),
+            ListKind.SiteLogs => ("Logs", "This site has no logs to read"),
+            ListKind.ServerLogs => ("Logs", "This server has no logs to read"),
             _ => ("Heartbeats", "No heartbeats for this site"),
         };
         SetHero($"{org?.Label ?? nav.Org} › {site?.Name ?? server?.Name ?? ""}", title,
@@ -807,6 +815,39 @@ public sealed partial class PanelWindow : Window
                         Detail = Status.HeartbeatDetail(h), Status = hLabel, Tone = hTone, Payload = h,
                     });
                     break;
+                case Deployment d:
+                    rows.Add(new RowItem
+                    {
+                        Key = "deployment|" + d.Id, Kind = RowKind.Event, Org = nav.Org,
+                        Title = d.CommitMessage != "" ? d.CommitMessage : "Deployment " + d.Id,
+                        Detail = Status.DeploymentDetail(d), Status = Status.DeploymentLabel(d.Status),
+                        Tone = Status.DeploymentTone(d.Status), Time = ForgeText.RelativeTime(Status.DeploymentTime(d), now), Payload = d,
+                    });
+                    break;
+                case BackgroundProcess p:
+                    var (pLabel, pTone) = Status.ProcessStatus(p);
+                    rows.Add(new RowItem
+                    {
+                        Key = "process|" + p.Id, Kind = RowKind.Event, Org = nav.Org,
+                        Title = p.Command == "" ? "Process " + p.Id : p.Command,
+                        Detail = Status.ProcessDetail(p), Status = pLabel, Tone = pTone, Payload = p,
+                    });
+                    break;
+                case LogChoice l:
+                    rows.Add(new RowItem
+                    {
+                        Key = "logchoice|" + l.Key, Kind = RowKind.Event, Org = nav.Org, Title = l.Label, Detail = l.Key, Payload = l,
+                    });
+                    break;
+                case ScheduledJob j:
+                    var (jLabel, jTone) = Status.ScheduledJobStatus(j);
+                    rows.Add(new RowItem
+                    {
+                        Key = "job|" + j.Id, Kind = RowKind.Event, Org = nav.Org, Title = Status.ScheduledJobTitle(j),
+                        Detail = Status.ScheduledJobDetail(j), Status = jLabel, Tone = jTone,
+                        Time = Status.ScheduledJobNext(j, now), Payload = j,
+                    });
+                    break;
             }
         }
         if (nav.Loading) rows.Add(Info("list-loading", "Loading…"));
@@ -821,6 +862,16 @@ public sealed partial class PanelWindow : Window
         PaneHeader.Text = pane.Error ?? pane.Header;
         PaneHeader.Visibility = PaneHeader.Text == "" ? Visibility.Collapsed : Visibility.Visible;
         PaneHeader.Foreground = pane.Error is not null || pane.Bad ? Palette.For(Tone.Bad) : Palette.Secondary;
+        var write = pane.Write?.Invoke();
+        PaneWriteButton.Visibility = write is null ? Visibility.Collapsed : Visibility.Visible;
+        if (write is not null)
+        {
+            PaneWriteIcon.Glyph = write.Method == "DELETE" ? "" : "";
+            var tip = write.Label + " (X)" + (write.Available ? "" : " — not now: " + write.Reason);
+            ToolTipService.SetToolTip(PaneWriteButton, tip);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(PaneWriteButton, write.Label);
+            PaneWriteButton.IsEnabled = write.Available && _busyKey == "";
+        }
         if (!ReferenceEquals(_paneShown, pane.Lines) || pane.Lines.Count == 0)
         {
             _paneShown = pane.Lines;
@@ -934,8 +985,16 @@ public sealed partial class PanelWindow : Window
             case RowKind.Action when row.Payload is ActionSpec spec:
                 RunAction(row, spec);
                 break;
-            case RowKind.Event when row.Payload is ForgeEvent ev && Top is NavList list:
-                OpenEventOutput(list, ev);
+            case RowKind.Event when Top is NavList list:
+                switch (row.Payload)
+                {
+                    case ForgeEvent ev: OpenEventOutput(list, ev); break;
+                    case Deployment d: OpenDeploymentLog(list, d); break;
+                    case BackgroundProcess p: OpenProcessLog(list, p); break;
+                    case ScheduledJob j: OpenJobOutput(list, j); break;
+                    case LogChoice { Site: true } l: OpenSiteLog(l.Key); break;
+                    case LogChoice l: OpenServerLog(l.Key); break;
+                }
                 break;
             case RowKind.Recipe when row.Payload is Recipe recipe && Top is NavList list:
                 ArmRecipe(list, row, recipe);
@@ -1128,19 +1187,46 @@ public sealed partial class PanelWindow : Window
             case "recipes": OpenList(ListKind.Recipes); break;
             case "monitors": OpenList(ListKind.Monitors); break;
             case "heartbeats": OpenList(ListKind.Heartbeats); break;
+            case "deployments": OpenList(ListKind.Deployments); break;
+            case "site-logs": OpenList(ListKind.SiteLogs); break;
+            case "server-logs": OpenList(ListKind.ServerLogs); break;
+            case "processes": OpenList(ListKind.Processes); break;
+            case "schedule": OpenList(ListKind.ServerJobs); break;
+            case "site-schedule": OpenList(ListKind.SiteJobs); break;
             case "forge": OpenForge(); break;
             case "ssh": CopySsh(); break;
             case "ssh-terminal": OpenTerminal(); break;
             case "open": OpenSite(); break;
-            case "log": OpenDeployLog(); break;
             case "command" when CurrentSite() is { } cs:
                 CommandBox.Text = "";
                 Push(new NavCommand { Org = cs.Org, SiteKey = cs.Site.Key });
                 break;
-            default:
-                if (spec.Log != "") OpenSiteLog(spec.Log);
-                break;
         }
+    }
+
+    /// <summary>
+    /// The open pane's one write — clear the log, restart the process — through
+    /// the same confirm as every other write; once sent, the pane reads again.
+    /// </summary>
+    private void ArmPaneWrite(NavPane pane)
+    {
+        if (pane.Write?.Invoke() is not { } spec) return;
+        if (!spec.Available)
+        {
+            Flash(spec.Reason == "" ? "Not available" : Capitalize(spec.Reason));
+            return;
+        }
+        var (title, body, cta) = WriteConfirm.Wording(spec, pane.WriteSubject);
+        var key = $"{spec.Id}|{pane.Org}|{pane.WriteServerId}|{pane.SiteKey}|{spec.ArmIntent}";
+        Arm(key, title, body, cta,
+            () => Top == pane && pane.Write?.Invoke() is { Available: true } now && now.ArmIntent == spec.ArmIntent,
+            async () =>
+            {
+                var latest = pane.Write?.Invoke() ?? spec;
+                var outcome = await _service.SendActionAsync(pane.Org, pane.WriteServerId, latest);
+                Flash(outcome.Message, !outcome.Ok);
+                if (outcome.Ok && pane.Reload is not null) await pane.Reload();
+            });
     }
 
     private void ArmDeploy()
@@ -1276,12 +1362,76 @@ public sealed partial class PanelWindow : Window
     {
         if (CurrentSite() is not { } cs) return;
         var (org, site) = cs;
+        var key = site.Key;
         OpenDocument(new NavPane
         {
             Org = org, SiteKey = site.Key, Crumb = site.Name, Title = Actions.SiteLogLabel(kind),
             EmptyText = "The log is empty",
             FileName = $"forge-{ForgeText.SafeFileName(site.Name)}-{ForgeText.SafeFileName(kind)}.log",
+            Write = () => Actions.ClearSiteLog(org, _service.Snapshot.Org(org)?.SiteByKey(key), kind),
+            WriteServerId = site.ServerId, WriteSubject = site.Name,
         }, () => _service.SiteLogAsync(org, site, kind));
+    }
+
+    private void OpenServerLog(string logKey)
+    {
+        if (CurrentServer() is not { } cs) return;
+        var (org, server) = cs;
+        var id = server.Id;
+        OpenDocument(new NavPane
+        {
+            Org = org, ServerId = id, Crumb = server.Name, Title = Actions.ServerLogLabel(logKey),
+            EmptyText = "The log is empty",
+            FileName = $"forge-{ForgeText.SafeFileName(server.Name)}-{ForgeText.SafeFileName(logKey)}.log",
+            Write = () => Actions.ClearServerLog(org, _service.Snapshot.Org(org)?.ServerById(id), logKey),
+            WriteServerId = id, WriteSubject = server.Name,
+        }, () => _service.ServerLogAsync(org, id, logKey));
+    }
+
+    private void OpenDeploymentLog(NavList list, Deployment d)
+    {
+        var site = _service.Snapshot.Org(list.Org)?.SiteByKey(list.SiteKey);
+        if (site is null) { Flash("That site is no longer listed"); return; }
+        OpenDocument(new NavPane
+        {
+            Org = list.Org, SiteKey = site.Key, Crumb = site.Name,
+            Title = d.CommitMessage != "" ? d.CommitMessage : "Deployment " + d.Id,
+            Header = Status.DeploymentLabel(d.Status) + (d.CommitHash == "" ? "" : " · " + d.CommitHash),
+            Bad = Status.DeploymentTone(d.Status) == Tone.Bad, EmptyText = "The deployment printed nothing",
+            FileName = $"forge-{ForgeText.SafeFileName(site.Name)}-{ForgeText.SafeFileName(d.Id)}.log",
+        }, () => _service.DeploymentLogAsync(list.Org, site, d.Id));
+    }
+
+    private void OpenProcessLog(NavList list, BackgroundProcess p)
+    {
+        var org = list.Org;
+        var id = list.ServerId;
+        var server = _service.Snapshot.Org(org)?.ServerById(id);
+        var (label, tone) = Status.ProcessStatus(p);
+        OpenDocument(new NavPane
+        {
+            Org = org, ServerId = id, Crumb = server?.Name ?? "", Title = p.Command == "" ? "Process " + p.Id : p.Command,
+            Header = string.Join(" · ", new[] { label, Status.ProcessDetail(p) }.Where(s => s != "")),
+            Bad = tone == Tone.Bad, EmptyText = "The process has logged nothing",
+            FileName = $"forge-{ForgeText.SafeFileName(server?.Name)}-process-{ForgeText.SafeFileName(p.Id)}.log",
+            Write = () => Actions.ProcessRestart(org, _service.Snapshot.Org(org)?.ServerById(id), p),
+            WriteServerId = id, WriteSubject = server?.Name ?? "this server",
+        }, () => _service.BackgroundProcessLogAsync(org, id, p.Id));
+    }
+
+    private void OpenJobOutput(NavList list, ScheduledJob j)
+    {
+        var org = _service.Snapshot.Org(list.Org);
+        var server = org?.ServerById(list.ServerId);
+        var site = list.SiteKey == "" ? null : org?.SiteByKey(list.SiteKey);
+        if (list.SiteKey != "" && site is null) { Flash("That site is no longer listed"); return; }
+        OpenDocument(new NavPane
+        {
+            Org = list.Org, ServerId = site is null ? list.ServerId : "", SiteKey = list.SiteKey,
+            Crumb = site?.Name ?? server?.Name ?? "", Title = Status.ScheduledJobTitle(j),
+            Header = Status.ScheduledJobDetail(j), EmptyText = "The last run printed nothing",
+            FileName = $"forge-{ForgeText.SafeFileName(site?.Name ?? server?.Name)}-cron-{ForgeText.SafeFileName(j.Id)}.log",
+        }, () => _service.ScheduledJobOutputAsync(list.Org, list.ServerId, site, j.Id));
     }
 
     private void OpenEventOutput(NavList list, ForgeEvent ev)
@@ -1299,7 +1449,7 @@ public sealed partial class PanelWindow : Window
     private void OpenList(ListKind kind)
     {
         NavList list;
-        if (kind == ListKind.Heartbeats)
+        if (kind is ListKind.Heartbeats or ListKind.Deployments or ListKind.SiteJobs or ListKind.SiteLogs)
         {
             if (CurrentSite() is not { } cs) return;
             list = new NavList { Kind = kind, Org = cs.Org, ServerId = cs.Site.ServerId, SiteKey = cs.Site.Key };
@@ -1341,12 +1491,54 @@ public sealed partial class PanelWindow : Window
                 result = (r.Value?.Cast<object>().ToList(), r.Error, r.NextCursor);
                 break;
             }
+            case ListKind.ServerLogs:
+            {
+                // Known from the server's type, PHP version and database: no request until one is opened.
+                var server = _service.Snapshot.Org(list.Org)?.ServerById(list.ServerId);
+                result = server is null ? (null, "That server is no longer listed", "")
+                    : (Actions.ServerLogKinds(server).Select(k => (object)new LogChoice(k.Key, k.Label, false)).ToList(), null, "");
+                break;
+            }
+            case ListKind.SiteLogs:
+                result = (Actions.SiteLogKinds.Select(k => (object)new LogChoice(k.Kind, k.Label, true)).ToList(), null, "");
+                break;
+            case ListKind.Processes:
+            {
+                var r = await _service.BackgroundProcessesAsync(list.Org, list.ServerId, cursor);
+                result = (r.Value?.Cast<object>().ToList(), r.Error, r.NextCursor);
+                break;
+            }
+            case ListKind.ServerJobs:
+            {
+                var r = await _service.ScheduledJobsAsync(list.Org, list.ServerId, null, cursor);
+                result = (r.Value?.Cast<object>().ToList(), r.Error, r.NextCursor);
+                break;
+            }
             default:
             {
                 var site = _service.Snapshot.Org(list.Org)?.SiteByKey(list.SiteKey);
                 if (site is null) { result = (null, "That site is no longer listed", ""); break; }
-                var r = await _service.HeartbeatsAsync(list.Org, site, cursor);
-                result = (r.Value?.Cast<object>().ToList(), r.Error, r.NextCursor);
+                switch (list.Kind)
+                {
+                    case ListKind.Deployments:
+                    {
+                        var r = await _service.DeploymentsAsync(list.Org, site, cursor);
+                        result = (r.Value?.Cast<object>().ToList(), r.Error, r.NextCursor);
+                        break;
+                    }
+                    case ListKind.SiteJobs:
+                    {
+                        var r = await _service.ScheduledJobsAsync(list.Org, site.ServerId, site, cursor);
+                        result = (r.Value?.Cast<object>().ToList(), r.Error, r.NextCursor);
+                        break;
+                    }
+                    default:
+                    {
+                        var r = await _service.HeartbeatsAsync(list.Org, site, cursor);
+                        result = (r.Value?.Cast<object>().ToList(), r.Error, r.NextCursor);
+                        break;
+                    }
+                }
                 break;
             }
         }
@@ -1537,6 +1729,7 @@ public sealed partial class PanelWindow : Window
             {
                 case VirtualKey.C when !ctrl: CopyPane(pane); e.Handled = true; return;
                 case VirtualKey.W: SavePane(pane); e.Handled = true; return;
+                case VirtualKey.X when !ctrl: ArmPaneWrite(pane); e.Handled = true; return;
                 case VirtualKey.R: Refresh(); e.Handled = true; return;
                 case VirtualKey.D: ArmDeploy(); e.Handled = true; return;
                 case VirtualKey.Escape or VirtualKey.Left or VirtualKey.H or VirtualKey.Back: Pop(); e.Handled = true; return;
@@ -1639,8 +1832,8 @@ public sealed partial class PanelWindow : Window
                 Item("Open site", "", "O", OpenSite, ForgeText.ExternalUrl(site.Url) != "");
                 Item("Open in Forge", "", "F", OpenForge);
                 Separator();
-                Item("Deployment log", "", "", OpenDeployLog, site.DeploymentId != "");
-                Item("Application log", "", "", () => OpenSiteLog("application"));
+                Item("Deployments", "", "", () => OpenList(ListKind.Deployments));
+                Item("Logs", "", "", () => OpenList(ListKind.SiteLogs));
                 Separator();
                 Item("Copy ssh command", "", "S", CopySsh);
                 Item("Open ssh in Windows Terminal", "", "T", OpenTerminal);
@@ -1649,7 +1842,7 @@ public sealed partial class PanelWindow : Window
                 return menu;
             case { Kind: RowKind.Server, Payload: Server server }:
                 Item("Server actions", "", "→", () => Push(new NavServer { Org = row.Org, ServerId = server.Id }));
-                Item("Server events", "", "E", () => OpenList(ListKind.Events));
+                Item("Events", "", "E", () => OpenList(ListKind.Events));
                 Item("Open in Forge", "", "F", OpenForge);
                 Separator();
                 Item("Copy ssh command", "", "S", CopySsh);
@@ -1740,6 +1933,7 @@ public sealed partial class PanelWindow : Window
     private void PaneReload_Click(object sender, RoutedEventArgs e) => Refresh();
     private void PaneCopy_Click(object sender, RoutedEventArgs e) { if (Top is NavPane p) CopyPane(p); }
     private void PaneSave_Click(object sender, RoutedEventArgs e) { if (Top is NavPane p) SavePane(p); }
+    private void PaneWrite_Click(object sender, RoutedEventArgs e) { if (Top is NavPane p) ArmPaneWrite(p); }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e) => Refresh();
 
@@ -1802,7 +1996,10 @@ internal sealed class NavCommand : Nav
     public string SiteKey { get; init; } = "";
 }
 
-internal enum ListKind { Events, Recipes, Monitors, Heartbeats }
+internal enum ListKind { Events, Recipes, Monitors, Heartbeats, Deployments, Processes, ServerJobs, SiteJobs, SiteLogs, ServerLogs }
+
+/// <summary>One row of a Logs list: which log, and whether it is the site's or the server's.</summary>
+internal sealed record LogChoice(string Key, string Label, bool Site);
 
 internal sealed class NavList : Nav
 {
@@ -1830,4 +2027,8 @@ internal sealed class NavPane : Nav
     public string FileName { get; init; } = "forge.log";
     public Func<Task>? Reload { get; set; }
     public RunWatch? Watch { get; set; }
+    /// <summary>The pane's one write (clear the log, restart the process), built fresh each time it is asked for.</summary>
+    public Func<ActionSpec?>? Write { get; init; }
+    public string WriteServerId { get; init; } = "";
+    public string WriteSubject { get; init; } = "";
 }

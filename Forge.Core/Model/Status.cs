@@ -201,6 +201,101 @@ public static class Status
         _ => 3,
     };
 
+    // ----------------------------------------------- background processes
+
+    /// <summary>
+    /// Supervisor's words. A process that is meant to run and isn't is the
+    /// point of the list: fatal and backoff are broken, stopped and exited are parked.
+    /// </summary>
+    public static (string Label, Tone Tone) ProcessStatus(BackgroundProcess p)
+    {
+        var s = p.Status.ToLowerInvariant();
+        if (s == "") return ("unknown", Tone.Idle);
+        var tone = s switch
+        {
+            "running" => Tone.Ok,
+            "fatal" or "backoff" or "failed" => Tone.Bad,
+            "stopped" or "exited" => Tone.Warn,
+            _ when s.EndsWith("ing", StringComparison.Ordinal) => Tone.Busy,
+            _ => Tone.Idle,
+        };
+        return (s.Replace('-', ' '), tone);
+    }
+
+    internal static int ProcessRank(BackgroundProcess p) => ProcessStatus(p).Tone switch
+    {
+        Tone.Bad => 0,
+        Tone.Warn => 1,
+        Tone.Busy => 2,
+        Tone.Idle => 3,
+        _ => 4,
+    };
+
+    public static string ProcessDetail(BackgroundProcess p)
+    {
+        var parts = new List<string>();
+        if (p.User != "") parts.Add("as " + p.User);
+        if (p.Processes > 1) parts.Add($"{p.Processes} processes");
+        if (p.Directory != "") parts.Add(p.Directory);
+        return string.Join(" · ", parts);
+    }
+
+    // ------------------------------------------------------ scheduled jobs
+
+    /// <summary>A job is named by its name when it has one, else by its command.</summary>
+    public static string ScheduledJobTitle(ScheduledJob j) =>
+        j.Name != "" ? j.Name : j.Command != "" ? j.Command : "scheduled job";
+
+    public static (string Label, Tone Tone) ScheduledJobStatus(ScheduledJob j)
+    {
+        var s = j.Status.ToLowerInvariant();
+        if (s is "" or "installed") return ("", Tone.Idle);
+        var tone = s.StartsWith("failed", StringComparison.Ordinal) ? Tone.Bad
+            : s.EndsWith("ing", StringComparison.Ordinal) ? Tone.Busy : Tone.Idle;
+        return (s.Replace('-', ' '), tone);
+    }
+
+    internal static int ScheduledJobRank(ScheduledJob j) => ScheduledJobStatus(j).Tone switch
+    {
+        Tone.Bad => 0,
+        Tone.Busy => 1,
+        _ => 2,
+    };
+
+    /// <summary>When the job runs next — a time still to come, unlike every other time on a row.</summary>
+    public static string ScheduledJobNext(ScheduledJob j, long nowMs) =>
+        ForgeText.Until(j.NextRunTime, nowMs) switch
+        {
+            "" => "",
+            "now" => "due now",
+            var until => "next " + until,
+        };
+
+    public static string ScheduledJobDetail(ScheduledJob j)
+    {
+        var parts = new List<string>();
+        var when = j.Frequency is "" or "custom" ? j.Cron : j.Frequency;
+        if (when != "") parts.Add(when);
+        if (j.User != "") parts.Add("as " + j.User);
+        if (j.Name != "" && j.Command != "") parts.Add(j.Command);
+        return string.Join(" · ", parts);
+    }
+
+    // --------------------------------------------------------- deployments
+
+    public static string DeploymentDetail(Deployment d)
+    {
+        var parts = new List<string>();
+        if (d.CommitHash != "") parts.Add(d.CommitHash);
+        if (d.CommitAuthor != "") parts.Add(d.CommitAuthor);
+        if (d.Type != "") parts.Add(d.Type);
+        return string.Join(" · ", parts);
+    }
+
+    /// <summary>When the deployment ended, else when it started, else when it was queued.</summary>
+    public static string DeploymentTime(Deployment d) =>
+        d.EndedAt != "" ? d.EndedAt : d.StartedAt != "" ? d.StartedAt : d.CreatedAt;
+
     // ------------------------------------------------------------- details
 
     /// <summary>The rest of the site payload, for the detail block. Empty values are dropped.</summary>

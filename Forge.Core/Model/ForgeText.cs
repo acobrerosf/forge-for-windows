@@ -196,6 +196,19 @@ public static partial class ForgeText
         return $"{(long)Math.Round(days / 30.0)}mo ago";
     }
 
+    /// <summary>How far off a time still to come is: "in 17m", "in 3h". Once it has passed, "now".</summary>
+    public static string Until(string? iso, long nowMs)
+    {
+        if (string.IsNullOrEmpty(iso) || Json.ParseIsoMs(iso) is not { } then) return "";
+        var seconds = (long)Math.Round((then - nowMs) / 1000.0);
+        if (seconds < 60) return "now";
+        var minutes = (long)Math.Round(seconds / 60.0);
+        if (minutes < 60) return $"in {minutes}m";
+        var hours = (long)Math.Round(minutes / 60.0);
+        if (hours < 24) return $"in {hours}h";
+        return $"in {(long)Math.Round(hours / 24.0)}d";
+    }
+
     /// <summary>Account names: lower-case words joined by hyphens.</summary>
     public static string Slugify(string? value)
     {

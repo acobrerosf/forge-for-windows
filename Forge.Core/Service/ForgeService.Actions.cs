@@ -9,6 +9,8 @@ public sealed partial class ForgeService
     private const string DeployLogScope = "Your token can't read deployment logs — that needs the site:manage-deploys scope";
     private const string SiteLogScope = "Your token can't read site logs — that needs the server:manage-logs scope";
     private const string RecipeViewScope = "Your token can't list recipes — that needs the recipe:view scope";
+    private const string ServerLogScope = "Your token can't read server logs — that needs the server:manage-logs scope";
+    private const string ProcessLogScope = "Your token can't read background process logs — that needs the server:create-daemons scope";
 
     // --------------------------------------------------------------- reads
 
@@ -53,6 +55,26 @@ public sealed partial class ForgeService
             ? Task.FromResult(new ReadResult<IReadOnlyList<string>>(null, "Unknown log"))
             : DocumentAsync(slug, Paths.SiteLog(slug, site.ServerId, site.Id, kind), "content", SiteLogScope, ForgeText.SiteLogContent, ct);
 
+    /// <summary>Any deployment's log, not only the latest one.</summary>
+    public Task<ReadResult<IReadOnlyList<string>>> DeploymentLogAsync(string slug, Site site, string deploymentId, CancellationToken ct = default) =>
+        deploymentId == ""
+            ? Task.FromResult(new ReadResult<IReadOnlyList<string>>(null, "That deployment has no id"))
+            : DocumentAsync(slug, Paths.DeploymentLog(slug, site.ServerId, site.Id, deploymentId), "output", DeployLogScope, null, ct);
+
+    public Task<ReadResult<IReadOnlyList<string>>> ServerLogAsync(string slug, string serverId, string key, CancellationToken ct = default) =>
+        !Actions.IsServerLogKind(key)
+            ? Task.FromResult(new ReadResult<IReadOnlyList<string>>(null, "Unknown log"))
+            : DocumentAsync(slug, Paths.ServerLog(slug, serverId, key), "content", ServerLogScope, ForgeText.SiteLogContent, ct);
+
+    public Task<ReadResult<IReadOnlyList<string>>> BackgroundProcessLogAsync(string slug, string serverId, string processId, CancellationToken ct = default) =>
+        DocumentAsync(slug, Paths.BackgroundProcessLog(slug, serverId, processId), "content", ProcessLogScope, ForgeText.SiteLogContent, ct);
+
+    /// <summary>The last run's output. A site's job lives under the site; <paramref name="site"/> chooses which.</summary>
+    public Task<ReadResult<IReadOnlyList<string>>> ScheduledJobOutputAsync(string slug, string serverId, Site? site, string jobId, CancellationToken ct = default) =>
+        DocumentAsync(slug,
+            site is null ? Paths.ScheduledJobOutput(slug, serverId, jobId) : Paths.SiteScheduledJobOutput(slug, site.ServerId, site.Id, jobId),
+            "output", ServerViewScope, null, ct);
+
     public Task<ReadResult<IReadOnlyList<string>>> EventOutputAsync(string slug, string serverId, string eventId, CancellationToken ct = default) =>
         DocumentAsync(slug, Paths.EventOutput(slug, serverId, eventId), "output", ServerViewScope, null, ct);
 
@@ -72,6 +94,18 @@ public sealed partial class ForgeService
 
     public Task<ReadResult<List<Heartbeat>>> HeartbeatsAsync(string slug, Site site, string? cursor = null, CancellationToken ct = default) =>
         ListAsync(slug, Paths.Heartbeats(slug, site.ServerId, site.Id, cursor), ServerViewScope, Parse.Heartbeats, ct);
+
+    public Task<ReadResult<List<Deployment>>> DeploymentsAsync(string slug, Site site, string? cursor = null, CancellationToken ct = default) =>
+        ListAsync(slug, Paths.Deployments(slug, site.ServerId, site.Id, cursor), ServerViewScope, Parse.Deployments, ct);
+
+    public Task<ReadResult<List<BackgroundProcess>>> BackgroundProcessesAsync(string slug, string serverId, string? cursor = null, CancellationToken ct = default) =>
+        ListAsync(slug, Paths.BackgroundProcesses(slug, serverId, cursor), ServerViewScope, Parse.BackgroundProcesses, ct);
+
+    /// <summary>The server's own jobs, or one site's when <paramref name="site"/> is given.</summary>
+    public Task<ReadResult<List<ScheduledJob>>> ScheduledJobsAsync(string slug, string serverId, Site? site, string? cursor = null, CancellationToken ct = default) =>
+        ListAsync(slug,
+            site is null ? Paths.ScheduledJobs(slug, serverId, cursor) : Paths.SiteScheduledJobs(slug, site.ServerId, site.Id, cursor),
+            ServerViewScope, Parse.ScheduledJobs, ct);
 
     public Task<ReadResult<List<Recipe>>> RecipesAsync(string slug, string? cursor = null, CancellationToken ct = default) =>
         ListAsync(slug, Paths.Recipes(slug, cursor), RecipeViewScope, Parse.Recipes, ct);

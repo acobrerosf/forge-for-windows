@@ -96,6 +96,47 @@ public sealed record Heartbeat
     public string CustomFrequency { get; init; } = "";
 }
 
+/// <summary>One row of a site's deployment history.</summary>
+public sealed record Deployment
+{
+    public required string Id { get; init; }
+    public string Status { get; init; } = "";
+    /// <summary>How it was started: manual, push, api…</summary>
+    public string Type { get; init; } = "";
+    public string CommitHash { get; init; } = "";
+    /// <summary>First line only.</summary>
+    public string CommitMessage { get; init; } = "";
+    public string CommitAuthor { get; init; } = "";
+    public string Branch { get; init; } = "";
+    public string StartedAt { get; init; } = "";
+    public string EndedAt { get; init; } = "";
+    public string CreatedAt { get; init; } = "";
+}
+
+/// <summary>A supervisor program on the server (what Forge used to call a daemon).</summary>
+public sealed record BackgroundProcess
+{
+    public required string Id { get; init; }
+    public string Command { get; init; } = "";
+    public string User { get; init; } = "";
+    public string Directory { get; init; } = "";
+    public int Processes { get; init; }
+    public string Status { get; init; } = "";
+}
+
+/// <summary>A cron entry, on the server or on one of its sites.</summary>
+public sealed record ScheduledJob
+{
+    public required string Id { get; init; }
+    public string Name { get; init; } = "";
+    public string Command { get; init; } = "";
+    public string User { get; init; } = "";
+    public string Frequency { get; init; } = "";
+    public string Cron { get; init; } = "";
+    public string NextRunTime { get; init; } = "";
+    public string Status { get; init; } = "";
+}
+
 public sealed record Organization(string Slug, string Name);
 
 public sealed record ForgeUser(string Email, string Name);

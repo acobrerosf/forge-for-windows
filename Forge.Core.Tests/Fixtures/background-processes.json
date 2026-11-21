@@ -1,0 +1,9 @@
+{
+  "data": [
+    { "id": 11, "type": "backgroundProcesses", "attributes": { "command": "php artisan queue:work", "user": "forge", "directory": "/home/forge/zeta", "processes": 2, "status": "running" } },
+    { "id": 12, "type": "backgroundProcesses", "attributes": { "command": "php artisan horizon", "user": "forge", "directory": null, "processes": 1, "status": "fatal" } },
+    { "id": 13, "type": "backgroundProcesses", "attributes": { "command": "node worker.js", "user": "forge", "processes": 1, "status": "stopped" } },
+    { "id": 14, "type": "backgroundProcesses", "attributes": { "command": "php artisan reverb:start", "user": "forge", "processes": 1, "status": "restarting" } }
+  ],
+  "meta": { "next_cursor": null }
+}

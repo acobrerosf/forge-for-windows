@@ -34,6 +34,16 @@ public sealed partial class LogView : UserControl
         set => ReloadButton.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    /// <summary>Raised by the Clear button; the owner asks, sends the delete, then reloads.</summary>
+    public event Action? ClearRequested;
+
+    /// <summary>Whether this log can be emptied on the server (site and server logs; not a deployment or an output).</summary>
+    public bool CanClear
+    {
+        get => ClearButton.Visibility == Visibility.Visible;
+        set => ClearButton.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     /// <summary>Icon-only buttons and a narrower search, for a log that shares its row with something else.</summary>
     public bool Compact
     {
@@ -41,7 +51,7 @@ public sealed partial class LogView : UserControl
         set
         {
             var labels = value ? Visibility.Collapsed : Visibility.Visible;
-            WrapLabel.Visibility = ReloadLabel.Visibility = CopyLabel.Visibility = SaveLabel.Visibility = labels;
+            WrapLabel.Visibility = ReloadLabel.Visibility = CopyLabel.Visibility = SaveLabel.Visibility = ClearLabel.Visibility = labels;
             FindColumn.Width = new GridLength(value ? 180 : 260);
         }
     }
@@ -113,6 +123,8 @@ public sealed partial class LogView : UserControl
     }
 
     private void ReloadButton_Click(object sender, RoutedEventArgs e) => ReloadRequested?.Invoke();
+
+    private void ClearButton_Click(object sender, RoutedEventArgs e) => ClearRequested?.Invoke();
 
     /// <summary>What a Copy or Save did, for the owner to report.</summary>
     public event Action<string, bool>? Reported;

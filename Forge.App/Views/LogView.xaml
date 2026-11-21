@@ -19,6 +19,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBox x:Name="FindBox" PlaceholderText="Find in log" TextChanged="FindBox_TextChanged"
                      AutomationProperties.Name="Find in log" />
@@ -48,6 +49,13 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE896;" />
                     <TextBlock x:Name="SaveLabel" Text="Save" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="6" x:Name="ClearButton" Click="ClearButton_Click" Visibility="Collapsed"
+                    ToolTipService.ToolTip="Empty this log on the server (asks first)" AutomationProperties.Name="Clear log">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE74D;" />
+                    <TextBlock x:Name="ClearLabel" Text="Clear" />
                 </StackPanel>
             </Button>
         </Grid>

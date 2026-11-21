@@ -195,10 +195,9 @@
                         </InfoBar>
                         <SelectorBar Grid.Row="2" x:Name="SiteTabs" SelectionChanged="SiteTabs_SelectionChanged">
                             <SelectorBarItem Text="Overview" Tag="overview" />
-                            <SelectorBarItem Text="Deployment log" Tag="log" />
-                            <SelectorBarItem Text="Application log" Tag="application" />
-                            <SelectorBarItem Text="Nginx errors" Tag="nginx-error" />
-                            <SelectorBarItem Text="Nginx access" Tag="nginx-access" />
+                            <SelectorBarItem Text="Deployments" Tag="deployments" />
+                            <SelectorBarItem Text="Logs" Tag="logs" />
+                            <SelectorBarItem Text="Schedule" Tag="schedule" />
                             <SelectorBarItem Text="Heartbeats" Tag="heartbeats" />
                             <SelectorBarItem Text="Run a command" Tag="command" />
                         </SelectorBar>
@@ -275,7 +274,13 @@
                                 </Grid>
                             </ScrollViewer>
 
-                            <local:LogView x:Name="SiteLog" Visibility="Collapsed" />
+                            <!-- Every list-and-output section is a ListLogPane: list on the left, the chosen item's output beside it. -->
+                            <local:ListLogPane x:Name="SiteDeployments" Visibility="Collapsed" ListName="Deployments" FollowFirst="True"
+                                               ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
+                            <local:ListLogPane x:Name="SiteLogs" Visibility="Collapsed" ListName="Site logs"
+                                               ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
+                            <local:ListLogPane x:Name="SiteJobs" Visibility="Collapsed" ListName="Scheduled jobs"
+                                               ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
 
                             <Grid x:Name="HeartbeatsPanel" Visibility="Collapsed" RowSpacing="8">
                                 <Grid.RowDefinitions>
@@ -351,23 +356,22 @@
                         <SelectorBar Grid.Row="1" x:Name="ServerTabs" SelectionChanged="ServerTabs_SelectionChanged">
                             <SelectorBarItem Text="Services" Tag="services" />
                             <SelectorBarItem Text="Events" Tag="events" />
+                            <SelectorBarItem Text="Logs" Tag="logs" />
+                            <SelectorBarItem Text="Processes" Tag="processes" />
+                            <SelectorBarItem Text="Schedule" Tag="schedule" />
                         </SelectorBar>
                         <Grid Grid.Row="2">
                             <ScrollViewer x:Name="ServicesPanel">
                                 <StackPanel x:Name="ServiceCards" Spacing="4" Padding="0,0,0,8" MaxWidth="900" HorizontalAlignment="Left" Width="720" />
                             </ScrollViewer>
-                            <Grid x:Name="EventsPanel" Visibility="Collapsed" ColumnSpacing="16">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="360" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border Style="{StaticResource Card}" Padding="4">
-                                    <ListView x:Name="EventList" SelectionMode="Single" ItemTemplate="{StaticResource EntryTemplate}"
-                                              ItemContainerStyle="{StaticResource EntryContainer}" SelectionChanged="EventList_SelectionChanged"
-                                              AutomationProperties.Name="Server events" />
-                                </Border>
-                                <local:LogView Grid.Column="1" x:Name="EventLog" Compact="True" />
-                            </Grid>
+                            <local:ListLogPane x:Name="ServerEvents" Visibility="Collapsed" ListName="Server events" FollowFirst="True"
+                                               ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
+                            <local:ListLogPane x:Name="ServerLogs" Visibility="Collapsed" ListName="Server logs"
+                                               ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
+                            <local:ListLogPane x:Name="ServerProcesses" Visibility="Collapsed" ListName="Background processes"
+                                               ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
+                            <local:ListLogPane x:Name="ServerJobs" Visibility="Collapsed" ListName="Scheduled jobs"
+                                               ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
                         </Grid>
                     </Grid>
 

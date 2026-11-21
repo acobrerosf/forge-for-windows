@@ -65,6 +65,38 @@ public static class Paths
     public static string SiteLog(string org, string serverId, string siteId, string kind) =>
         Site(org, serverId, siteId) + "/logs/" + E(kind);
 
+    /// <summary>Newest first has to be asked for, as with events.</summary>
+    public static string Deployments(string org, string serverId, string siteId, string? cursor = null) =>
+        Paged(Deploy(org, serverId, siteId) + "?sort=-created_at", cursor);
+
+    /// <summary><paramref name="key"/> is never API data — always a key from <see cref="Actions.ServerLogKinds"/>.</summary>
+    public static string ServerLog(string org, string serverId, string key) =>
+        Server(org, serverId) + "/logs/" + E(key);
+
+    public static string BackgroundProcesses(string org, string serverId, string? cursor = null) =>
+        Paged(Server(org, serverId) + "/background-processes", cursor);
+
+    public static string BackgroundProcess(string org, string serverId, string processId) =>
+        Server(org, serverId) + "/background-processes/" + E(processId);
+
+    public static string BackgroundProcessLog(string org, string serverId, string processId) =>
+        BackgroundProcess(org, serverId, processId) + "/log";
+
+    public static string BackgroundProcessAction(string org, string serverId, string processId) =>
+        BackgroundProcess(org, serverId, processId) + "/actions";
+
+    public static string ScheduledJobs(string org, string serverId, string? cursor = null) =>
+        Paged(Server(org, serverId) + "/scheduled-jobs", cursor);
+
+    public static string ScheduledJobOutput(string org, string serverId, string jobId) =>
+        Server(org, serverId) + "/scheduled-jobs/" + E(jobId) + "/output";
+
+    public static string SiteScheduledJobs(string org, string serverId, string siteId, string? cursor = null) =>
+        Paged(Site(org, serverId, siteId) + "/scheduled-jobs", cursor);
+
+    public static string SiteScheduledJobOutput(string org, string serverId, string siteId, string jobId) =>
+        Site(org, serverId, siteId) + "/scheduled-jobs/" + E(jobId) + "/output";
+
     public static string Commands(string org, string serverId, string siteId) => Site(org, serverId, siteId) + "/commands";
 
     public static string CommandList(string org, string serverId, string siteId) =>

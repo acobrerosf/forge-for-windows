@@ -39,7 +39,7 @@ public sealed record ActionSpec
 
     /// <summary>For server rows: which service the server type is asked about.</summary>
     public string Service { get; init; } = "";
-    /// <summary>For site log rows: which of the three logs.</summary>
+    /// <summary>For a clear-log write: which log it empties.</summary>
     public string Log { get; init; } = "";
     public string RecipeId { get; init; } = "";
 }
@@ -60,6 +60,133 @@ public static partial class Actions
 
     public static string SiteLogLabel(string kind) =>
         SiteLogKinds.FirstOrDefault(k => k.Kind == kind).Label ?? kind;
+
+    public const string LogScopeMessage =
+        "Your token can't clear logs — that needs the server:manage-logs scope";
+
+    public const string ProcessScopeMessage =
+        "Your token can't manage background processes — that needs the server:create-daemons scope";
+
+    // ---------------------------------------------------------- server logs
+
+    /// <summary>Every key <c>logs/{key}</c> accepts, in the order a list shows them.</summary>
+    private static readonly IReadOnlyList<(string Key, string Label)> AllServerLogKinds =
+    [
+        ("nginx-error", "Nginx error log"),
+        ("nginx-access", "Nginx access log"),
+        ("php-8.5", "PHP 8.5 log"), ("php-8.4", "PHP 8.4 log"), ("php-8.3", "PHP 8.3 log"),
+        ("php-8.2", "PHP 8.2 log"), ("php-8.1", "PHP 8.1 log"), ("php-8.0", "PHP 8.0 log"),
+        ("php-7.4", "PHP 7.4 log"), ("php-7.3", "PHP 7.3 log"), ("php-7.2", "PHP 7.2 log"),
+        ("php-7.1", "PHP 7.1 log"), ("php-7.0", "PHP 7.0 log"), ("php-5.6", "PHP 5.6 log"),
+        ("php-5", "PHP 5 log"),
+        ("database-mysql", "MySQL log"),
+        ("database-mariadb", "MariaDB log"),
+        ("database-postgresql", "Postgres log"),
+        ("redis-server", "Redis log"),
+        ("meilisearch", "Meilisearch log"),
+        ("ssh", "SSH log"),
+        ("unattended-upgrades", "Unattended upgrades log"),
+    ];
+
+    [GeneratedRegex(@"^php([0-9])([0-9]*)(-old)?$")]
+    private static partial Regex PhpPoolParts();
+
+    /// <summary>The server reports <c>php84</c>; the log key is <c>php-8.4</c>.</summary>
+    public static string ServerPhpLogKey(Server? server)
+    {
+        var m = PhpPoolParts().Match(server?.PhpVersion ?? "");
+        if (!m.Success) return "";
+        var key = m.Groups[2].Value == "" ? "php-" + m.Groups[1].Value : $"php-{m.Groups[1].Value}.{m.Groups[2].Value}";
+        return IsServerLogKind(key) ? key : "";
+    }
+
+    /// <summary>
+    /// Only the logs this server can have: what its type runs, the PHP version
+    /// it reports and its database. The rest would answer with an empty file or a 404.
+    /// </summary>
+    public static IReadOnlyList<(string Key, string Label)> ServerLogKinds(Server? server)
+    {
+        if (server is null) return [];
+        var keep = new HashSet<string>(StringComparer.Ordinal) { "ssh", "unattended-upgrades" };
+        if (ServerRuns(server, "nginx")) { keep.Add("nginx-error"); keep.Add("nginx-access"); }
+        if (ServerRuns(server, "php") && ServerPhpLogKey(server) is { Length: > 0 } php) keep.Add(php);
+        if (ServerRuns(server, "redis")) keep.Add("redis-server");
+        if (server.Kind == "meilisearch") keep.Add("meilisearch");
+        var db = server.DatabaseType;
+        if (ServerRuns(server, "database") && db != "")
+        {
+            if (db.StartsWith("mysql", StringComparison.Ordinal)) keep.Add("database-mysql");
+            else if (db.StartsWith("mariadb", StringComparison.Ordinal)) keep.Add("database-mariadb");
+            else if (db.StartsWith("postgres", StringComparison.Ordinal)) keep.Add("database-postgresql");
+        }
+        return AllServerLogKinds.Where(k => keep.Contains(k.Key)).ToList();
+    }
+
+    public static bool IsServerLogKind(string key) => AllServerLogKinds.Any(k => k.Key == key);
+
+    public static string ServerLogLabel(string key) =>
+        AllServerLogKinds.FirstOrDefault(k => k.Key == key).Label ?? key;
+
+    // -------------------------------------------------------- log clearing
+
+    /// <summary>"Nginx error log" reads as "the nginx error log" mid-sentence; names written in capitals stay as they are.</summary>
+    private static string Lower(string label) =>
+        label.Length > 1 && char.IsLower(label[1]) && !label.StartsWith("My", StringComparison.Ordinal)
+            && !label.StartsWith("Maria", StringComparison.Ordinal)
+            ? char.ToLowerInvariant(label[0]) + label[1..] : label;
+
+    /// <summary>Empties one of a site's three logs. The open log is read again by whoever asked.</summary>
+    public static ActionSpec ClearSiteLog(string org, Site? site, string kind)
+    {
+        var known = IsSiteLogKind(kind);
+        var label = SiteLogLabel(kind);
+        return new ActionSpec
+        {
+            Id = "clear-log", Log = kind, Label = "Clear " + Lower(label), Armable = true, ArmIntent = kind,
+            Available = site is not null && known, Reason = site is null ? "not listed" : "unknown log",
+            ArmedText = "press Y to empty the " + Lower(label), Done = label + " cleared",
+            Method = "DELETE", ScopeMessage = LogScopeMessage,
+            Path = site is null || !known ? "" : Paths.SiteLog(org, site.ServerId, site.Id, kind),
+        };
+    }
+
+    public static ActionSpec ClearServerLog(string org, Server? server, string key)
+    {
+        var known = IsServerLogKind(key);
+        var label = ServerLogLabel(key);
+        return new ActionSpec
+        {
+            Id = "clear-log", Log = key, Label = "Clear " + Lower(label), Armable = true, ArmIntent = key,
+            Available = server is not null && known, Reason = server is null ? "not listed" : "unknown log",
+            ArmedText = "press Y to empty the " + Lower(label), Done = label + " cleared",
+            Method = "DELETE", ScopeMessage = LogScopeMessage,
+            Path = server is null || !known ? "" : Paths.ServerLog(org, server.Id, key),
+        };
+    }
+
+    // ------------------------------------------------- background processes
+
+    private static string Short(string command) => command.Length <= 60 ? command : command[..57] + "…";
+
+    /// <summary>
+    /// Forge accepts restart, start, stop and empty-log; only restart is offered.
+    /// A provisioning or unreachable server answers 4xx, so the row says so first.
+    /// </summary>
+    public static ActionSpec ProcessRestart(string org, Server? server, BackgroundProcess? process)
+    {
+        var ready = server?.State == ServerState.Ready;
+        var listed = server is not null && process is not null;
+        return new ActionSpec
+        {
+            Id = "process-restart", Label = "Restart process", Armable = true, ArmIntent = process?.Id ?? "",
+            Available = listed && ready,
+            Reason = !listed ? "not listed" : Status.ServerStateLabel(server!.State),
+            ArmedText = "press Y to restart " + Short(process?.Command ?? "the process"),
+            Done = "Restart requested", ScopeMessage = ProcessScopeMessage,
+            Path = listed ? Paths.BackgroundProcessAction(org, server!.Id, process!.Id) : "",
+            Body = Obj(("action", "restart")),
+        };
+    }
 
     // ----------------------------------------------------------------- php
 
@@ -179,7 +306,11 @@ public static partial class Actions
                 ArmedText = "press Y to reboot", Done = "Reboot requested",
                 ScopeMessage = ServerScopeMessage, Refetch = Refetch.Org,
                 Path = Paths.ServerAction(org, id), Body = Obj(("action", "reboot")) },
-            new() { Id = "events", Label = "Server events", Hint = "e" },
+            // Each section is one row that opens its list; the list opens on its first item.
+            new() { Id = "events", Label = "Events", Hint = "e" },
+            new() { Id = "server-logs", Label = "Logs", Available = ServerLogKinds(server).Count > 0, Reason = "not listed" },
+            new() { Id = "processes", Label = "Background processes", Available = server is not null, Reason = "not listed" },
+            new() { Id = "schedule", Label = "Scheduled jobs", Available = server is not null, Reason = "not listed" },
             new() { Id = "recipes", Label = "Run a recipe…" },
             new() { Id = "monitors", Label = "Monitors" },
             new() { Id = "forge", Label = "Open in Forge", Hint = "f" },
@@ -202,7 +333,6 @@ public static partial class Actions
     public static IReadOnlyList<ActionSpec> SiteActions(string org, Site? site)
     {
         var deployable = Status.CanDeploy(site);
-        var deployed = site is not null && site.DeploymentId != "";
         var url = ForgeText.ExternalUrl(site?.Url);
         var parked = site?.Maintenance == true;
         var moving = site?.MaintenanceStatus ?? "";
@@ -235,13 +365,11 @@ public static partial class Actions
                 Path = site is null ? "" : Paths.ServiceAction(org, site.ServerId, "php"),
                 Body = Obj(("action", "reload"), ("version", pool)) },
             new() { Id = "command", Label = "Run a command…", Available = site is not null, Reason = "not listed" },
-            new() { Id = "log", Label = "Deployment log", Available = deployed, Reason = deployed ? "" : "never deployed" },
+            // Each section is one row that opens its list; the list opens on its first item (the newest deployment).
+            new() { Id = "deployments", Label = "Deployments", Available = site is not null, Reason = "not listed" },
+            new() { Id = "site-logs", Label = "Logs", Available = site is not null, Reason = "not listed" },
+            new() { Id = "site-schedule", Label = "Scheduled jobs", Available = site is not null, Reason = "not listed" },
         };
-        list.AddRange(SiteLogKinds.Select(k => new ActionSpec
-        {
-            Id = "site-log:" + k.Kind, Log = k.Kind, Label = k.Label,
-            Available = site is not null, Reason = "not listed",
-        }));
         list.Add(new() { Id = "heartbeats", Label = "Heartbeats", Available = site is not null, Reason = "not listed" });
         list.Add(new() { Id = "open", Label = "Open site", Hint = "o", Available = url != "", Reason = url != "" ? "" : "no address" });
         list.Add(new() { Id = "forge", Label = "Open in Forge", Hint = "f" });
