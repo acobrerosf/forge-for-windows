@@ -10,8 +10,9 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
   chips for anything failed, deploying or in maintenance. Hover a row for Deploy and Open site, or
   right-click it for everything else. Works fully from the keyboard too.
   - Site: deploy, maintenance mode, PHP-FPM reload, run a command, heartbeats, open site, open in Forge,
-    copy ssh, open ssh in Windows Terminal, and three sections: **Deployments** (every deployment and its log),
-    **Logs** (application, nginx error, nginx access; clear them too) and **Scheduled jobs** (with the last run's output).
+    copy ssh, open ssh in Windows Terminal, and four sections: **Deployments** (every deployment and its log),
+    **Logs** (application, nginx error, nginx access; clear them too), **Scheduled jobs** (with the last run's output)
+    and **Config files** (opens the window's Config tab).
   - Server: restart nginx, PHP-FPM, supervisor, redis and the database (only the services the server type
     runs), reboot, recipes, monitors, and four sections: **Events**, **Logs** (nginx, PHP, database, redis,
     ssh… only the ones the server can have; clear them too), **Background processes** (status and log;
@@ -20,6 +21,13 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
   Each section is one tab laid out the same way: the list on the left, and beside it the output of the
   chosen item, with find, wrap, copy and save. A tab opens on its first item (the newest deployment or
   event), so there is always something to read.
+- **Config** (a site's tab in the window): the environment file, the deploy script and the nginx config.
+  Each opens read-only; **Edit** is a separate mode, and **Save** (or Ctrl+S) shows a diff of what changes
+  and asks first. Forge's copy is read again just before saving, and if it changed since you opened it
+  (someone saved it on the website, say), nothing is overwritten. After a save the tab shows what Forge
+  now holds. The environment file's values are masked until you press **Reveal**, there's no "save to
+  Downloads" for any of the three, and copying the environment file keeps it out of clipboard history.
+  Line endings stay as Forge sent them.
 - **Nothing extra on the poll.** History, logs, processes and jobs are read only when you open them.
 - **Toasts** when a deployment finishes or fails, with Open site, View log and Open in Forge buttons.
 - **Every write asks first** in a small dialog. Cancel has the focus, so Enter and Esc both drop it;
@@ -93,9 +101,11 @@ from the Actions tab builds the same files as a downloadable artifact, without m
 
 1. Create a token at <https://forge.laravel.com/profile/api>. Read access to servers and sites is enough
    to watch them, and to list deployments, background processes and scheduled jobs and read a job's output.
-   Each write scope is opt-in: `site:manage-deploys` (deploy, read deployment logs), `server:manage-services`,
+   Each write scope is opt-in: `site:manage-deploys` (deploy, read deployment logs, read and edit the deploy script), `server:manage-services`,
    `site:manage-commands`, `server:manage-logs` (read and clear site and server logs),
-   `server:create-daemons` (read a background process's log and restart it), `recipe:view` and `recipe:manage`.
+   `server:create-daemons` (read a background process's log and restart it), `recipe:view`, `recipe:manage`,
+   `site:manage-environment` (read and edit the environment file) and `site:manage-nginx` (read and edit the
+   site's nginx config).
    A view whose scope is missing says which one it needs.
 2. Start the app. On first run Settings opens. Paste the token, press **Check token**, pick the
    organizations to watch, then press **Save account**.
@@ -105,6 +115,8 @@ What is stored where:
 - **Tokens:** Windows Credential Manager, under Generic credentials named `ForgeForWindows:<account>`.
   They are never written to a file.
 - **Everything else** (accounts, organizations, settings): `%LOCALAPPDATA%\ForgeForWindows\state.json`.
+- **Config files** (the environment file above all): never written to disk or to the app's log. They are
+  held in memory only while the Config tab shows them.
 - **"Start with Windows":** `HKCU\...\Run\ForgeForWindows`. The app then starts with `--background`.
 
 ## Rate limit
@@ -115,6 +127,7 @@ Forge allows 60 requests a minute per Forge user, shared with your browser. The 
 - Past 150 sites, the site list is checked in rotation.
 - While a deploy runs, the app looks every 15 seconds instead of at the normal interval.
 - A 429 response pauses every organization behind that Forge user until Forge's reset time.
+- A config file costs 1 request when opened. A save costs 3: the check that it hasn't changed, the save, and reading it back.
 
 ## Build
 

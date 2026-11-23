@@ -323,6 +323,19 @@ public static partial class Parse
 
     public static JsonNode? Attributes(JsonNode? body) => Json.Get(body, "data", "attributes");
 
+    /// <summary>
+    /// A config file exactly as Forge sent it: no trimming, no line-ending changes. Null
+    /// when the answer has no <c>content</c>. <c>auto_source</c> rides along when present.
+    /// </summary>
+    public static ConfigDocument? ConfigDocument(JsonNode? body)
+    {
+        // A null content is an empty file; a missing one is a malformed answer.
+        if (Attributes(body) is not JsonObject attrs || !attrs.ContainsKey("content")) return null;
+        var content = ResourceText(body, "content") ?? "";
+        var auto = Json.Get(Attributes(body), "auto_source") is JsonValue v && v.TryGetValue<bool>(out var b) ? b : (bool?)null;
+        return new ConfigDocument(content, auto);
+    }
+
     /// <summary>A single resource's string field, or null when it is missing (a malformed answer, unlike an empty one).</summary>
     public static string? ResourceText(JsonNode? body, string field) =>
         Json.Get(Attributes(body), field) is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;

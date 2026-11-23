@@ -369,6 +369,8 @@ public static partial class Actions
             new() { Id = "deployments", Label = "Deployments", Available = site is not null, Reason = "not listed" },
             new() { Id = "site-logs", Label = "Logs", Available = site is not null, Reason = "not listed" },
             new() { Id = "site-schedule", Label = "Scheduled jobs", Available = site is not null, Reason = "not listed" },
+            // Opens the window's Config tab: the flyout never shows a config file.
+            new() { Id = "config", Label = "Config files…", Available = site is not null, Reason = "not listed" },
         };
         list.Add(new() { Id = "heartbeats", Label = "Heartbeats", Available = site is not null, Reason = "not listed" });
         list.Add(new() { Id = "open", Label = "Open site", Hint = "o", Available = url != "", Reason = url != "" ? "" : "no address" });
@@ -394,6 +396,26 @@ public static partial class Actions
             ScopeMessage = "Your token can't run commands — that needs the site:manage-commands scope",
             Path = site is null ? "" : Paths.Commands(org, site.ServerId, site.Id),
             Body = Obj(("command", text)),
+        };
+    }
+
+    /// <summary>
+    /// Replaces one of the site's config files with <paramref name="content"/>, whole. The deploy
+    /// script's <c>auto_source</c> is sent back only when Forge reported it, so a save never flips it.
+    /// </summary>
+    public static ActionSpec SaveConfig(string org, Site? site, ConfigFile file, string content, bool? autoSource = null)
+    {
+        var info = ConfigFiles.Of(file);
+        var body = Obj((info.BodyKey, content));
+        if (file == ConfigFile.DeployScript && autoSource is { } auto) body["auto_source"] = auto;
+        return new ActionSpec
+        {
+            Id = "config-save", Label = "Save " + ConfigFiles.Lower(file), Armable = true, ArmIntent = info.Key,
+            Available = site is not null, Reason = "not listed",
+            ArmedText = "press Y to save the " + ConfigFiles.Lower(file), Done = info.Label + " saved",
+            Method = "PUT", ScopeMessage = ConfigFiles.WriteScopeMessage(file),
+            Path = site is null ? "" : ConfigFiles.Path(org, site, file),
+            Body = body,
         };
     }
 

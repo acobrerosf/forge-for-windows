@@ -19,7 +19,8 @@ public sealed partial class ForgeService
     /// is held or the ceiling is close. Refusals are reported to whoever asked,
     /// never across the organization's rows.
     /// </summary>
-    private async Task<(ForgeEnvelope? Env, string? Error, bool Fatal)> ReadAsync(string slug, string path, string scope403, CancellationToken ct)
+    private async Task<(ForgeEnvelope? Env, string? Error, bool Fatal)> ReadAsync(string slug, string path, string scope403, CancellationToken ct,
+        bool force = false)
     {
         string account;
         lock (_lock)
@@ -27,7 +28,7 @@ public sealed partial class ForgeService
             if (!_orgs.TryGetValue(slug, out var st)) return (null, "That organization is no longer watched", true);
             account = st.Account;
         }
-        var env = await RequestAsync(account, "GET", path, null, force: false, ct).ConfigureAwait(false);
+        var env = await RequestAsync(account, "GET", path, null, force, ct).ConfigureAwait(false);
         if (env.Ok) return (env, null, false);
         if (env.MissingToken) { Publish(); return (null, env.ErrorMessage, true); }
         if (env.Status == 401) return (null, "Forge rejected the token", true);

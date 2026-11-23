@@ -34,6 +34,18 @@ internal static class Shell
     }
 
     /// <summary>
+    /// Text that holds credentials (an environment file): on the clipboard for a paste, but kept
+    /// out of Win+V history and off the clipboard sync to other devices.
+    /// </summary>
+    public static void CopySecret(string text)
+    {
+        var package = new DataPackage { RequestedOperation = DataPackageOperation.Copy };
+        package.SetText(text);
+        Clipboard.SetContentWithOptions(package, new ClipboardContentOptions { IsAllowedInHistory = false, IsRoamable = false });
+        Clipboard.Flush();
+    }
+
+    /// <summary>
     /// <c>wt.exe ssh forge@host -p N</c>, as an argv — no shell string, and the
     /// host is held to address characters first. Falls back to a plain console.
     /// </summary>

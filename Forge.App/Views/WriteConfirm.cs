@@ -17,11 +17,13 @@ namespace Forge.App.Views;
 internal static class WriteConfirm
 {
     /// <param name="shown">Gets the dialog while it is up, so the caller can close it early (the flyout hiding, say).</param>
+    /// <param name="detail">Shown below the body: the diff a config save will make, say.</param>
     public static async Task<bool> AskAsync(XamlRoot root, ElementTheme theme, string title, string body, string cta,
-        Action<ContentDialog?>? shown = null)
+        Action<ContentDialog?>? shown = null, UIElement? detail = null)
     {
         var text = new StackPanel { Spacing = 12 };
         text.Children.Add(new TextBlock { Text = body, TextWrapping = TextWrapping.Wrap });
+        if (detail is not null) text.Children.Add(detail);
         text.Children.Add(new TextBlock
         {
             Text = "Shift+Y also confirms. Enter or Esc cancels.",
@@ -33,6 +35,8 @@ internal static class WriteConfirm
             XamlRoot = root,
             Title = title,
             Content = text,
+            // A diff needs more room than a sentence; ContentDialog caps its own width otherwise.
+            Resources = detail is null ? new ResourceDictionary() : new ResourceDictionary { ["ContentDialogMaxWidth"] = 900.0 },
             PrimaryButtonText = cta,
             CloseButtonText = "Cancel",
             // No default button: a default is drawn as the accent, and the accent belongs on the write.
@@ -84,6 +88,75 @@ internal static class WriteConfirm
             "reboot" => ($"Reboot {subject}?", "Every site on it is offline until it is back up.", "Reboot"),
             _ => ($"{spec.Label}?", $"This will {what} on {subject}.", spec.Label.Split(' ')[0]),
         };
+    }
+
+    /// <summary>
+    /// What a config save changes, as a confirm dialog shows it: removed lines in red, added in
+    /// green, unchanged ones grey, gaps and notes in italics. Scrolls when long.
+    /// </summary>
+    public static UIElement DiffBlock(IReadOnlyList<DiffLine> diff)
+    {
+        var lines = new StackPanel();
+        foreach (var line in diff)
+        {
+            var (prefix, brush) = line.Kind switch
+            {
+                DiffKind.Added => ("+ ", Palette.For(Tone.Ok)),
+                DiffKind.Removed => ("− ", Palette.For(Tone.Bad)),
+                DiffKind.Same => ("  ", Palette.Secondary),
+                _ => ("", Palette.Tertiary),
+            };
+            lines.Children.Add(new TextBlock
+            {
+                Text = line.Kind is DiffKind.Gap ? "⋯ " + line.Text : prefix + line.Text,
+                Foreground = brush,
+                FontStyle = line.Kind is DiffKind.Gap or DiffKind.Note ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal,
+                FontFamily = (FontFamily)Application.Current.Resources["MonoFont"],
+                FontSize = 12.5,
+                TextWrapping = TextWrapping.NoWrap,
+                IsTextSelectionEnabled = false,
+            });
+        }
+        return new Border
+        {
+            Child = new ScrollViewer
+            {
+                Content = lines,
+                MaxHeight = 360,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollMode = ScrollMode.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Padding = new Thickness(10, 8, 14, 10),
+            },
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+            Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
+        };
+    }
+
+    /// <summary>Asks before an unsaved edit is thrown away. Keep editing has the focus; nothing is sent either way.</summary>
+    public static async Task<bool> DiscardAsync(XamlRoot root, ElementTheme theme, string what)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = root,
+            Title = "Discard your changes?",
+            Content = new TextBlock { Text = $"Your edit to the {what} hasn't been saved. Discarding it leaves Forge's copy as it is.", TextWrapping = TextWrapping.Wrap },
+            PrimaryButtonText = "Discard",
+            CloseButtonText = "Keep editing",
+            DefaultButton = ContentDialogButton.Close,
+            RequestedTheme = theme,
+        };
+        try
+        {
+            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        }
+        catch (Exception e)
+        {
+            Log.Write("Discard dialog: " + e.Message);
+            return false;
+        }
     }
 
     private static bool IsDown(VirtualKey key) =>

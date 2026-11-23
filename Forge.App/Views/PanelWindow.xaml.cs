@@ -33,7 +33,7 @@ public sealed partial class PanelWindow : Window
     private readonly ForgeService _service;
     private readonly Action _openSettings;
     /// <summary>Opens the expanded window, on a site when given one (organization slug, site key).</summary>
-    private readonly Action<string?, string?> _openWindow;
+    private readonly Action<string?, string?, string?> _openWindow;
     private readonly List<Nav> _nav = [new NavTree()];
     private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
     private readonly DispatcherQueueTimer _flashTimer;
@@ -63,7 +63,7 @@ public sealed partial class PanelWindow : Window
     private long _hiddenAtMs;
     private IReadOnlyList<string>? _paneShown;
 
-    public PanelWindow(ForgeService service, Action openSettings, Action<string?, string?> openWindow)
+    public PanelWindow(ForgeService service, Action openSettings, Action<string?, string?, string?> openWindow)
     {
         _service = service;
         _openSettings = openSettings;
@@ -415,7 +415,7 @@ public sealed partial class PanelWindow : Window
         ["supervisor-restart"] = "", ["redis-restart"] = "", ["database-restart"] = "",
         ["reboot"] = "", ["events"] = "", ["recipes"] = "", ["monitors"] = "",
         ["deployments"] = "", ["processes"] = "", ["schedule"] = "", ["site-schedule"] = "",
-        ["site-logs"] = "", ["server-logs"] = "",
+        ["site-logs"] = "", ["server-logs"] = "", ["config"] = "",
     };
 
     private static string GlyphFor(ActionSpec a) =>
@@ -427,7 +427,7 @@ public sealed partial class PanelWindow : Window
         // Drawn as the page's buttons and switch instead.
         "deploy" or "open" or "maintenance" => "",
         "deployments" or "site-logs" or "site-schedule" or "events" or "server-logs" or "processes" or "schedule" => "Activity",
-        "command" or "site-php-reload" or "heartbeats" => "Tools",
+        "command" or "site-php-reload" or "heartbeats" or "config" => "Tools",
         "forge" or "ssh" or "ssh-terminal" => "Connect",
         "reboot" or "recipes" or "monitors" => "Server",
         _ => "Services",
@@ -1193,6 +1193,7 @@ public sealed partial class PanelWindow : Window
             case "processes": OpenList(ListKind.Processes); break;
             case "schedule": OpenList(ListKind.ServerJobs); break;
             case "site-schedule": OpenList(ListKind.SiteJobs); break;
+            case "config": OpenWindow("config"); break;
             case "forge": OpenForge(); break;
             case "ssh": CopySsh(); break;
             case "ssh-terminal": OpenTerminal(); break;
@@ -1941,12 +1942,15 @@ public sealed partial class PanelWindow : Window
 
     private void WindowButton_Click(object sender, RoutedEventArgs e) => OpenWindow();
 
-    /// <summary>Moves to the expanded window, on whatever site the flyout is showing or pointing at.</summary>
-    private void OpenWindow()
+    /// <summary>
+    /// Moves to the expanded window, on whatever site the flyout is showing or pointing at, and on
+    /// <paramref name="tab"/> when one is named: config files are read and edited only there.
+    /// </summary>
+    private void OpenWindow(string? tab = null)
     {
         var current = CurrentSite();
         HidePanel();
-        _openWindow(current?.Org, current?.Site.Key);
+        _openWindow(current?.Org, current?.Site.Key, tab);
     }
 
     // ---------------------------------------------------------------- win32

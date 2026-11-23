@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Forge.App.Views.ConfigPane"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Forge.App.Views">
+
+    <!-- The site's config files on the left, the chosen one beside it: laid out as the log tabs are. -->
+    <Grid ColumnSpacing="16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="360" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="6" Padding="4">
+            <ListView x:Name="Items" SelectionMode="Single" SelectionChanged="Items_SelectionChanged"
+                      AutomationProperties.Name="Config files" />
+        </Border>
+        <local:ConfigView Grid.Column="1" x:Name="Editor" x:FieldModifier="public" />
+    </Grid>
+</UserControl>

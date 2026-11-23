@@ -198,6 +198,7 @@
                             <SelectorBarItem Text="Deployments" Tag="deployments" />
                             <SelectorBarItem Text="Logs" Tag="logs" />
                             <SelectorBarItem Text="Schedule" Tag="schedule" />
+                            <SelectorBarItem Text="Config" Tag="config" />
                             <SelectorBarItem Text="Heartbeats" Tag="heartbeats" />
                             <SelectorBarItem Text="Run a command" Tag="command" />
                         </SelectorBar>
@@ -281,6 +282,9 @@
                                                ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
                             <local:ListLogPane x:Name="SiteJobs" Visibility="Collapsed" ListName="Scheduled jobs"
                                                ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
+                            <!-- The environment file, deploy script and nginx config: read, or edit and save with a diff. -->
+                            <local:ConfigPane x:Name="SiteConfig" Visibility="Collapsed"
+                                              ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
 
                             <Grid x:Name="HeartbeatsPanel" Visibility="Collapsed" RowSpacing="8">
                                 <Grid.RowDefinitions>

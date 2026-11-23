@@ -62,6 +62,15 @@ public static class Paths
     public static string DeploymentLog(string org, string serverId, string siteId, string deploymentId) =>
         Deploy(org, serverId, siteId) + "/" + E(deploymentId) + "/log";
 
+    /// <summary>The site's <c>.env</c>: GET answers <c>content</c>, PUT takes <c>environment</c>.</summary>
+    public static string SiteEnvironment(string org, string serverId, string siteId) => Site(org, serverId, siteId) + "/environment";
+
+    /// <summary>The deploy script: GET answers <c>content</c>, PUT takes <c>content</c>.</summary>
+    public static string DeploymentScript(string org, string serverId, string siteId) => Deploy(org, serverId, siteId) + "/script";
+
+    /// <summary>The site's nginx config: GET answers <c>content</c>, PUT takes <c>config</c>.</summary>
+    public static string SiteNginx(string org, string serverId, string siteId) => Site(org, serverId, siteId) + "/nginx";
+
     public static string SiteLog(string org, string serverId, string siteId, string kind) =>
         Site(org, serverId, siteId) + "/logs/" + E(kind);
 

@@ -44,6 +44,7 @@ public sealed partial class ForgeWindow : Window
     private bool _syncing;
     private bool _sending;
     private bool _closed;
+    private bool _closeAnyway;
     private bool _choseOnce;
     private RunWatch? _commandWatch;
     private readonly System.Collections.ObjectModel.ObservableCollection<ListEntry> _navItems = [];
@@ -112,6 +113,19 @@ public sealed partial class ForgeWindow : Window
         ServerJobs.MoreRequested += () => LoadJobs(ServerJobs, ServerJobs.Next, site: false);
         foreach (var pane in new[] { SiteDeployments, SiteLogs, SiteJobs, ServerEvents, ServerLogs, ServerProcesses, ServerJobs })
             pane.Log.Reported += Flash;
+        SiteConfig.Picked += e => { if (e.Payload is ConfigFile f) LoadConfig(f); };
+        SiteConfig.Editor.ReloadRequested += SiteConfig.Reopen;
+        SiteConfig.Editor.SaveRequested += SaveConfig;
+        SiteConfig.Editor.Reported += Flash;
+        // Only a close from the title bar or Alt+F4 comes here; quitting from the tray closes regardless.
+        AppWindow.Closing += async (_, args) =>
+        {
+            if (_closeAnyway || !SiteConfig.IsDirty) return;
+            args.Cancel = true;
+            if (!await MayLeaveConfigAsync()) return;
+            _closeAnyway = true;
+            Close();
+        };
 
         _flashTimer = DispatcherQueue.CreateTimer();
         _flashTimer.Interval = TimeSpan.FromSeconds(6);
@@ -128,6 +142,7 @@ public sealed partial class ForgeWindow : Window
             _clock.Stop();
             _flashTimer.Stop();
             _commandWatch?.Stop();
+            SiteConfig.Reset();
         };
 
         _syncing = true;
@@ -140,14 +155,35 @@ public sealed partial class ForgeWindow : Window
 
     private static long NowMs => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-    /// <summary>Shows the window, on a given site when one is named (from the flyout's current site, say).</summary>
-    public void ShowAndFocus(string? org = null, string? siteKey = null)
+    /// <summary>
+    /// Shows the window, on a given site when one is named (from the flyout's current site, say),
+    /// and on one of its tabs when <paramref name="tab"/> names one (the flyout's "Config files…").
+    /// </summary>
+    public void ShowAndFocus(string? org = null, string? siteKey = null, string? tab = null)
     {
-        if (!string.IsNullOrEmpty(org) && !string.IsNullOrEmpty(siteKey)) SelectSite(org, siteKey);
-        else if (!_choseOnce) ChooseSomethingUseful();
-        _choseOnce = true;
         AppWindow.Show();
         Activate();
+        if (!string.IsNullOrEmpty(org) && !string.IsNullOrEmpty(siteKey)) GoToSite(org, siteKey, tab);
+        else if (!_choseOnce) ChooseSomethingUseful();
+        _choseOnce = true;
+    }
+
+    /// <summary>Moves to a site, asking first when that would drop an unsaved config edit.</summary>
+    private async void GoToSite(string org, string siteKey, string? tab = null)
+    {
+        var same = _org == org && _siteKey == siteKey;
+        if (!same && !await MayLeaveConfigAsync()) return;
+        if (!same) SelectSite(org, siteKey, tab);
+        else if (tab is not null && tab != _siteTab) ShowSiteTab(tab);
+    }
+
+    /// <summary>True when nothing unsaved would be lost, or the reader chose to drop it.</summary>
+    private async Task<bool> MayLeaveConfigAsync()
+    {
+        if (!SiteConfig.IsDirty) return true;
+        if (!await WriteConfirm.DiscardAsync(Root.XamlRoot, Root.ActualTheme, SiteConfig.Editor.What)) return false;
+        SiteConfig.Editor.EndEdit();
+        return true;
     }
 
     public void OnServiceChanged()
@@ -342,7 +378,7 @@ public sealed partial class ForgeWindow : Window
 
     // ----------------------------------------------------------------- site
 
-    private void SelectSite(string org, string siteKey)
+    private void SelectSite(string org, string siteKey, string? tab = null)
     {
         if (_org == org && _siteKey == siteKey) return;
         _org = org;
@@ -356,9 +392,11 @@ public sealed partial class ForgeWindow : Window
         SiteLogs.Reset();
         SiteDeployments.Reset();
         SiteJobs.Reset();
+        SiteConfig.Reset();
         _followTone = null;
-        // A site with a failed deploy opens on the log that says why.
-        _siteTab = Status.SiteTone(CurrentSite()) == Tone.Bad ? "deployments" : "overview";
+        // A site with a failed deploy opens on the log that says why, unless a tab was asked for.
+        _siteTab = tab is not null && SiteTabs.Items.Any(i => (string)i.Tag == tab) ? tab
+            : Status.SiteTone(CurrentSite()) == Tone.Bad ? "deployments" : "overview";
         _syncing = true;
         SiteTabs.SelectedItem = SiteTabs.Items.First(i => (string)i.Tag == _siteTab);
         _syncing = false;
@@ -434,6 +472,7 @@ public sealed partial class ForgeWindow : Window
         SiteLogs.Visibility = _siteTab == "logs" ? Visibility.Visible : Visibility.Collapsed;
         SiteDeployments.Visibility = _siteTab == "deployments" ? Visibility.Visible : Visibility.Collapsed;
         SiteJobs.Visibility = _siteTab == "schedule" ? Visibility.Visible : Visibility.Collapsed;
+        SiteConfig.Visibility = _siteTab == "config" ? Visibility.Visible : Visibility.Collapsed;
         HeartbeatsPanel.Visibility = _siteTab == "heartbeats" ? Visibility.Visible : Visibility.Collapsed;
         CommandPanel.Visibility = _siteTab == "command" ? Visibility.Visible : Visibility.Collapsed;
         RunButton.IsEnabled = CommandBox.Text.Trim() != "" && !_sending;
@@ -513,6 +552,11 @@ public sealed partial class ForgeWindow : Window
                 break;
             case "logs":
                 LoadSiteLogKinds();
+                break;
+            case "config":
+                // Coming back to the tab keeps an edit in progress; it is only re-read when not editing.
+                if (SiteConfig.Editor.IsEditing) break;
+                SiteConfig.ShowFiles();
                 break;
             case "heartbeats":
             {
@@ -656,6 +700,86 @@ public sealed partial class ForgeWindow : Window
         else SiteLogs.Log.ShowError(result.Error ?? "Could not read the log");
     }
 
+    // -------------------------------------------------------- config files
+
+    /// <summary>One config file, read whole. A newer load (or another site) makes the answer stale, and it is dropped.</summary>
+    private async void LoadConfig(ConfigFile file)
+    {
+        if (CurrentSite() is not { } site) return;
+        var org = _org;
+        var gen = ++_loadGen;
+        SiteConfig.Editor.ShowLoading(file);
+        var result = await _service.ConfigFileAsync(org, site, file);
+        if (gen != _loadGen || _closed) return;
+        if (result.Ok) SiteConfig.Editor.Show(file, result.Value!);
+        else SiteConfig.Editor.ShowError(file, result.Error ?? "Could not read the " + ConfigFiles.Lower(file));
+    }
+
+    /// <summary>
+    /// Shows what the edit changes and asks; then the service checks the file is still what was
+    /// opened, saves it and reads it back. Nothing here logs or keeps the file's text.
+    /// </summary>
+    private async void SaveConfig()
+    {
+        var editor = SiteConfig.Editor;
+        if (_sending || CurrentSite() is not { } site || editor.File is not { } file || editor.Document is not { } baseline) return;
+        var org = _org;
+        var key = site.Key;
+        var edited = editor.EditedText;
+        if (edited == baseline.Content) { Flash("Nothing changed"); return; }
+
+        var what = ConfigFiles.Lower(file);
+        var diff = ConfigText.Diff(baseline.Content, edited, maskContext: file == ConfigFile.Environment);
+        var body = $"This replaces the {what} of {site.Name} with your edit. Forge's copy is read again first; if it changed since you opened it, nothing is saved."
+            + (file switch
+            {
+                ConfigFile.Nginx => "\n\nA broken nginx config can stop the site (and others on the server) from responding. Check it before you save.",
+                ConfigFile.Environment => "\n\nUnchanged values are hidden below. The app may need a deploy or a queue restart to pick up the change.",
+                _ => "\n\nIt runs on the next deploy.",
+            });
+        if (!await WriteConfirm.AskAsync(Root.XamlRoot, Root.ActualTheme, $"Save the {what}?", body, "Save",
+                detail: WriteConfirm.DiffBlock(diff)))
+        {
+            Flash("Not saved");
+            return;
+        }
+        if (_closed || _org != org || _siteKey != key || editor.File != file || editor.Document != baseline
+            || !editor.IsEditing || editor.EditedText != edited
+            || _service.Snapshot.Org(org)?.SiteByKey(key) is not { } latest)
+        {
+            Flash("That changed while you were deciding. Nothing was sent.", bad: true);
+            return;
+        }
+
+        _sending = true;
+        editor.Busy = true;
+        RenderPage();
+        try
+        {
+            var outcome = await _service.SaveConfigAsync(org, latest, file, baseline, edited);
+            if (_closed) return;
+            Flash(outcome.Message, !outcome.Ok);
+            var stillOpen = _org == org && _siteKey == key && editor.File == file;
+            if (!stillOpen) return;
+            if (outcome.Conflict)
+                editor.Note($"Forge's copy changed since you opened it, so nothing was saved. Copy your edit if you need it, then Discard and Reload to see the new version.", bad: true);
+            else if (outcome.Ok && outcome.Now is { } now)
+                editor.Show(file, now, "Saved. This is what Forge holds now.");
+            else if (outcome.Ok)
+                editor.ShowError(file, outcome.Message + ". Reload to see what Forge holds.");
+        }
+        catch (Exception ex)
+        {
+            Flash(ex.Message, bad: true);
+        }
+        finally
+        {
+            _sending = false;
+            editor.Busy = false;
+            if (!_closed) RenderPage();
+        }
+    }
+
     /// <summary>The logs this server can have, from what it already reports: only the opened log costs a request.</summary>
     private void LoadServerLogKinds()
     {
@@ -791,6 +915,7 @@ public sealed partial class ForgeWindow : Window
         _syncing = true;
         ServerTabs.SelectedItem = ServerTabs.Items[0];
         _syncing = false;
+        SiteConfig.Reset();
         ServerEvents.Reset();
         ServerLogs.Reset();
         ServerProcesses.Reset();
@@ -1142,10 +1267,17 @@ public sealed partial class ForgeWindow : Window
 
     // ----------------------------------------------------------- navigation
 
-    private void NavList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void NavList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_syncing) return;
-        switch (NavList.SelectedItem)
+        var picked = NavList.SelectedItem;
+        if (picked is ListEntry { Kind: EntryKind.Site or EntryKind.Server } && SiteConfig.IsDirty)
+        {
+            // The list shows the edited site again until the reader says to drop the edit.
+            RenderNav(_service.Snapshot);
+            if (!await MayLeaveConfigAsync()) return;
+        }
+        switch (picked)
         {
             case ListEntry { Kind: EntryKind.Site, Payload: Site site } entry:
                 SelectSite(entry.Org, site.Key);
@@ -1178,7 +1310,7 @@ public sealed partial class ForgeWindow : Window
     private void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
     {
         if (NavList.Items.OfType<ListEntry>().FirstOrDefault(e => e.Kind == EntryKind.Site) is { Payload: Site site } first)
-            SelectSite(first.Org, site.Key);
+            GoToSite(first.Org, site.Key);
     }
 
     private void SearchBox_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -1205,7 +1337,10 @@ public sealed partial class ForgeWindow : Window
     /// <summary>F5 reloads what is being read (a log, heartbeats, events) and checks Forge again.</summary>
     private void Reload()
     {
-        if (CurrentSite() is not null && _siteTab is not ("overview" or "command")) LoadSiteTab();
+        if (CurrentSite() is not null && _siteTab == "config" && SiteConfig.Editor.IsEditing)
+            Flash("Save or discard your edit first; the file isn't read again while you edit it.");
+        else if (CurrentSite() is not null && _siteTab == "config" && SiteConfig.HasFiles) SiteConfig.Reopen();
+        else if (CurrentSite() is not null && _siteTab is not ("overview" or "command")) LoadSiteTab();
         else if (CurrentSite() is null && CurrentServer() is not null) LoadServerTab();
         _service.RefreshNow();
         UpdatedText.Text = "Refreshing…";
