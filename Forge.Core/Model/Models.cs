@@ -96,6 +96,9 @@ public sealed record Heartbeat
     public string CustomFrequency { get; init; } = "";
 }
 
+/// <summary>A URL Forge calls after each deploy. It may carry a token (Slack, Discord), so it is treated as a secret.</summary>
+public sealed record Webhook(string Id, string Url, string CreatedAt);
+
 /// <summary>One row of a site's deployment history.</summary>
 public sealed record Deployment
 {

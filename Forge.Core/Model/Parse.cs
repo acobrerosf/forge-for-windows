@@ -254,6 +254,21 @@ public static partial class Parse
             .Where(d => d.Id != "")
             .ToList();
 
+    /// <summary>Oldest first, as Forge lists them; a row with no id cannot be deleted and is dropped.</summary>
+    public static List<Webhook> Webhooks(JsonNode? body) =>
+        Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                return new Webhook(Json.Str(Json.Get(r, "id")), Json.Str(Json.Get(a, "url")), Json.Str(Json.Get(a, "created_at")));
+            })
+            .Where(w => w.Id != "" && w.Url != "")
+            .ToList();
+
+    /// <summary>The site's public deploy key: "" when the site has none (Forge answers <c>key: null</c>), null when the answer is malformed.</summary>
+    public static string? DeployKey(JsonNode? body) =>
+        Attributes(body) is JsonObject attrs && attrs.ContainsKey("key") ? ResourceText(body, "key") ?? "" : null;
+
     /// <summary>Broken ones first, so a stopped or failed process is at the top of the list.</summary>
     public static List<BackgroundProcess> BackgroundProcesses(JsonNode? body) =>
         Json.Items(body, "data")

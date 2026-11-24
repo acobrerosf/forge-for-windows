@@ -19,6 +19,17 @@ public static partial class ForgeText
 
     public static string Pluralize(int count, string singular) => $"{count} {singular}{(count == 1 ? "" : "s")}";
 
+    /// <summary>
+    /// A webhook URL as a list shows it: scheme and host, the rest hidden, since a path or query
+    /// often carries a token (Slack, Discord). Anything that isn't an absolute URL is hidden whole.
+    /// </summary>
+    public static string MaskedUrl(string? value)
+    {
+        if (!Uri.TryCreate((value ?? "").Trim(), UriKind.Absolute, out var uri) || uri.Host == "") return "•••";
+        var rest = uri.PathAndQuery is "/" or "" && uri.Fragment == "" ? "" : "/…";
+        return uri.Scheme + "://" + uri.Authority.Split('@')[^1] + rest;
+    }
+
     // -------------------------------------------------------------- address
 
     [GeneratedRegex(@"^(https?://)([^/?#]+)([/?#][\s\S]*)?$", RegexOptions.IgnoreCase)]

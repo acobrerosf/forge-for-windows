@@ -68,6 +68,27 @@ public static class Paths
     /// <summary>The deploy script: GET answers <c>content</c>, PUT takes <c>content</c>.</summary>
     public static string DeploymentScript(string org, string serverId, string siteId) => Deploy(org, serverId, siteId) + "/script";
 
+    /// <summary>
+    /// Quick deploy: POST (empty body) turns it on, DELETE turns it off; the sites list's
+    /// <c>quick_deploy</c> reports it. Not <c>deployments/status</c>, whose DELETE resets a deployment's state.
+    /// </summary>
+    public static string PushToDeploy(string org, string serverId, string siteId) => Deploy(org, serverId, siteId) + "/push-to-deploy";
+
+    /// <summary>The deploy hook: GET answers <c>url</c>, PUT (no body) makes a new one and answers it.</summary>
+    public static string DeployHook(string org, string serverId, string siteId) => Deploy(org, serverId, siteId) + "/deploy-hook";
+
+    /// <summary>The URLs Forge calls after a deploy: POST takes <c>url</c>.</summary>
+    public static string Webhooks(string org, string serverId, string siteId, string? cursor = null) =>
+        Paged(Site(org, serverId, siteId) + "/webhooks", cursor);
+
+    public static string WebhookCreate(string org, string serverId, string siteId) => Site(org, serverId, siteId) + "/webhooks";
+
+    public static string Webhook(string org, string serverId, string siteId, string webhookId) =>
+        Site(org, serverId, siteId) + "/webhooks/" + E(webhookId);
+
+    /// <summary>GET answers <c>key</c> (null when there is none), POST makes one, DELETE removes it.</summary>
+    public static string DeployKey(string org, string serverId, string siteId) => Site(org, serverId, siteId) + "/deploy-key";
+
     /// <summary>The site's nginx config: GET answers <c>content</c>, PUT takes <c>config</c>.</summary>
     public static string SiteNginx(string org, string serverId, string siteId) => Site(org, serverId, siteId) + "/nginx";
 

@@ -311,6 +311,7 @@ public static class Status
         if (site.MaintenanceStatus != "") Add("Maintenance", site.MaintenanceStatus);
         else if (site.Maintenance) Add("Maintenance", "on");
         if (site.Isolated) Add("Isolation", "isolated user");
+        if (CanDeploy(site)) Add("Quick deploy", site.QuickDeploy ? "on" : "off");
         if (site.ZeroDowntime) Add("Deploys", "zero downtime");
         if (site.UsesEnvoyer) Add("Deploys", "via Envoyer");
         if (site.DeploymentRetention > 0) Add("Keeps", ForgeText.Pluralize(site.DeploymentRetention, "release"));

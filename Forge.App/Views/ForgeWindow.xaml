@@ -199,6 +199,7 @@
                             <SelectorBarItem Text="Logs" Tag="logs" />
                             <SelectorBarItem Text="Schedule" Tag="schedule" />
                             <SelectorBarItem Text="Config" Tag="config" />
+                            <SelectorBarItem Text="Deploy" Tag="deploy" />
                             <SelectorBarItem Text="Heartbeats" Tag="heartbeats" />
                             <SelectorBarItem Text="Run a command" Tag="command" />
                         </SelectorBar>
@@ -285,6 +286,81 @@
                             <!-- The environment file, deploy script and nginx config: read, or edit and save with a diff. -->
                             <local:ConfigPane x:Name="SiteConfig" Visibility="Collapsed"
                                               ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
+
+                            <!-- How the site deploys: quick deploy, the deploy hook, webhooks and the deploy key. Read when the tab opens. -->
+                            <ScrollViewer x:Name="DeployPanel" Visibility="Collapsed">
+                                <StackPanel Spacing="12" Padding="0,0,0,8" MaxWidth="760" HorizontalAlignment="Left">
+                                    <Border Style="{StaticResource Card}">
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="Quick deploy" />
+                                                <TextBlock x:Name="QuickDeployText" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <ToggleSwitch Grid.Column="1" x:Name="QuickDeploySwitch" MinWidth="0" Toggled="QuickDeploySwitch_Toggled"
+                                                          OnContent="On" OffContent="Off"
+                                                          AutomationProperties.Name="Quick deploy" />
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Deploy hook" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap"
+                                                       Text="A URL that deploys the site when called, for CI. Anyone holding it can deploy, so it is copied without being shown and kept out of clipboard history." />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Button x:Name="DeployHookCopyButton" Click="DeployHookCopy_Click">
+                                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                                        <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE8C8;" />
+                                                        <TextBlock Text="Copy URL" />
+                                                    </StackPanel>
+                                                </Button>
+                                                <Button x:Name="DeployHookRegenerateButton" Click="DeployHookRegenerate_Click">
+                                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                                        <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE72C;" />
+                                                        <TextBlock Text="Regenerate…" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Deployment webhooks" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock x:Name="WebhooksText" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                            <StackPanel x:Name="WebhookRows" Spacing="4" />
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="WebhookBox" PlaceholderText="https://example.com/forge-deployed" IsSpellCheckEnabled="False"
+                                                         KeyDown="WebhookBox_KeyDown" TextChanged="WebhookBox_TextChanged"
+                                                         AutomationProperties.Name="Webhook URL" />
+                                                <Button Grid.Column="1" x:Name="WebhookAddButton" Content="Add…" Click="WebhookAdd_Click" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Deploy key" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock x:Name="DeployKeyState" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                            <TextBlock x:Name="DeployKeyText" FontFamily="{StaticResource MonoFont}" FontSize="12" TextWrapping="Wrap"
+                                                       IsTextSelectionEnabled="True" MaxLines="4" TextTrimming="CharacterEllipsis" Visibility="Collapsed" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Button x:Name="DeployKeyCopyButton" Content="Copy public key" Click="DeployKeyCopy_Click" Visibility="Collapsed" />
+                                                <Button x:Name="DeployKeyCreateButton" Content="Create…" Click="DeployKeyCreate_Click" Visibility="Collapsed" />
+                                                <Button x:Name="DeployKeyDeleteButton" Content="Delete…" Click="DeployKeyDelete_Click" Visibility="Collapsed" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
 
                             <Grid x:Name="HeartbeatsPanel" Visibility="Collapsed" RowSpacing="8">
                                 <Grid.RowDefinitions>

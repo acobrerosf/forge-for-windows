@@ -86,6 +86,17 @@ internal static class WriteConfirm
                 ("Turn on maintenance mode?", $"Visitors to {subject} get a 503 page until you turn it off.", "Turn on"),
             "maintenance" => ("Turn off maintenance mode?", $"{subject} starts serving visitors again.", "Turn off"),
             "reboot" => ($"Reboot {subject}?", "Every site on it is offline until it is back up.", "Reboot"),
+            "quick-deploy" when spec.ArmIntent == "on" =>
+                ("Turn on quick deploy?", $"Every push to the branch deploys {subject} straight away.", "Turn on"),
+            "quick-deploy" => ("Turn off quick deploy?", $"Pushes stop deploying {subject}. Deploy still works by hand and through the deploy hook.", "Turn off"),
+            "deploy-hook-regenerate" => ("Regenerate the deploy hook URL?",
+                $"The current URL for {subject} stops working at once. Any CI or script that calls it will fail until you give it the new one.", "Regenerate"),
+            "webhook-delete" => ("Delete this webhook?", $"Forge stops calling it after deploys of {subject}.", "Delete"),
+            "webhook-add" => ("Add this webhook?", $"Forge will call it after every deploy of {subject}.", "Add"),
+            "deploy-key-create" => ("Create a deploy key?",
+                $"Forge makes an SSH key for {subject}. Add the public key to the repository so Forge can pull with it.", "Create"),
+            "deploy-key-delete" => ("Delete the deploy key?",
+                $"If {subject} pulls its repository with this key, deploys fail until a new key is added to the repository.", "Delete"),
             _ => ($"{spec.Label}?", $"This will {what} on {subject}.", spec.Label.Split(' ')[0]),
         };
     }

@@ -393,6 +393,7 @@ public sealed partial class ForgeWindow : Window
         SiteDeployments.Reset();
         SiteJobs.Reset();
         SiteConfig.Reset();
+        ResetDeploy();
         _followTone = null;
         // A site with a failed deploy opens on the log that says why, unless a tab was asked for.
         _siteTab = tab is not null && SiteTabs.Items.Any(i => (string)i.Tag == tab) ? tab
@@ -473,6 +474,8 @@ public sealed partial class ForgeWindow : Window
         SiteDeployments.Visibility = _siteTab == "deployments" ? Visibility.Visible : Visibility.Collapsed;
         SiteJobs.Visibility = _siteTab == "schedule" ? Visibility.Visible : Visibility.Collapsed;
         SiteConfig.Visibility = _siteTab == "config" ? Visibility.Visible : Visibility.Collapsed;
+        DeployPanel.Visibility = _siteTab == "deploy" ? Visibility.Visible : Visibility.Collapsed;
+        RenderDeploy(site);
         HeartbeatsPanel.Visibility = _siteTab == "heartbeats" ? Visibility.Visible : Visibility.Collapsed;
         CommandPanel.Visibility = _siteTab == "command" ? Visibility.Visible : Visibility.Collapsed;
         RunButton.IsEnabled = CommandBox.Text.Trim() != "" && !_sending;
@@ -483,7 +486,7 @@ public sealed partial class ForgeWindow : Window
     /// branches, commits and addresses are shown exactly as they are.
     /// </summary>
     internal static string FactValue(string label, string value) =>
-        label is "Type" or "Status" or "Deploys" or "Isolation" or "Maintenance" ? Capitalize(value) : value;
+        label is "Type" or "Status" or "Deploys" or "Isolation" or "Maintenance" or "Quick deploy" ? Capitalize(value) : value;
 
     private void SetFacts(IReadOnlyList<(string Label, string Value)> facts)
     {
@@ -557,6 +560,9 @@ public sealed partial class ForgeWindow : Window
                 // Coming back to the tab keeps an edit in progress; it is only re-read when not editing.
                 if (SiteConfig.Editor.IsEditing) break;
                 SiteConfig.ShowFiles();
+                break;
+            case "deploy":
+                LoadDeploy(gen);
                 break;
             case "heartbeats":
             {

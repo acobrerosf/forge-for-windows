@@ -357,6 +357,11 @@ public static partial class Actions
                 Refetch = Refetch.Sites, SettleSites = true,
                 Path = site is null ? "" : Paths.Maintenance(org, site.ServerId, site.Id),
                 Body = parked ? null : Obj(("status", 503)) },
+            QuickDeploy(org, site),
+            // The hook URL is fetched when asked for and goes straight to the clipboard.
+            new() { Id = "deploy-hook", Label = "Copy deploy hook URL", Hint = "u", Available = site is not null, Reason = "not listed" },
+            // Opens the window's Deploy tab: hook, webhooks and deploy key are managed there.
+            new() { Id = "deploy-settings", Label = "Deploy settings…", Available = site is not null, Reason = "not listed" },
             new() { Id = "site-php-reload", Label = "Reload PHP-FPM" + (pool != "" ? $" ({pool})" : ""),
                 Armable = true, ArmIntent = pool, Available = pool != "",
                 Reason = site is null ? "not listed" : site.PhpVersion != "" ? "unknown PHP version" : "no PHP version reported",
@@ -379,6 +384,99 @@ public static partial class Actions
         list.Add(new() { Id = "ssh-terminal", Label = "Open ssh in Windows Terminal", Hint = "t" });
         return list;
     }
+
+    // ------------------------------------------------------ deploy controls
+
+    public const string DeployScopeMessage =
+        "Your token can't change deploy settings — that needs the site:manage-deploys scope";
+
+    /// <summary>
+    /// Push to deploy: on means every push to the branch deploys. The state is the sites
+    /// list's <c>quick_deploy</c>, so the toggle costs no read of its own.
+    /// </summary>
+    public static ActionSpec QuickDeploy(string org, Site? site)
+    {
+        var on = site?.QuickDeploy == true;
+        var deployable = Status.CanDeploy(site);
+        return new ActionSpec
+        {
+            Id = "quick-deploy", Label = on ? "Disable quick deploy" : "Enable quick deploy", Hint = "q",
+            Armable = true, ArmIntent = on ? "off" : "on",
+            Available = deployable, Reason = site is null ? "not listed" : "no repository",
+            ArmedText = on ? "press Y to stop deploying on push" : "press Y to deploy on every push",
+            Done = on ? "Quick deploy off — requested" : "Quick deploy on — requested",
+            Method = on ? "DELETE" : "POST", ScopeMessage = DeployScopeMessage,
+            Refetch = Refetch.Sites,
+            Path = site is null ? "" : Paths.PushToDeploy(org, site.ServerId, site.Id),
+            Body = on ? null : new JsonObject(),
+        };
+    }
+
+    /// <summary>A new hook URL. The old one stops working at once, so anything calling it (CI) breaks.</summary>
+    public static ActionSpec RegenerateDeployHook(string org, Site? site) => new()
+    {
+        Id = "deploy-hook-regenerate", Label = "Regenerate deploy hook URL", Armable = true,
+        Available = site is not null, Reason = "not listed",
+        ArmedText = "press Y to replace the deploy hook URL", Done = "New deploy hook URL made",
+        Method = "PUT", ScopeMessage = DeployScopeMessage,
+        Path = site is null ? "" : Paths.DeployHook(org, site.ServerId, site.Id),
+    };
+
+    /// <summary>"" when <paramref name="text"/> is a URL Forge can call, otherwise why not.</summary>
+    public static string WebhookUrlProblem(string? text)
+    {
+        var value = (text ?? "").Trim();
+        if (value == "") return "Type a URL first";
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Host == "") return "That isn't a URL";
+        if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) return "Use an http or https URL";
+        return "";
+    }
+
+    public static ActionSpec AddWebhook(string org, Site? site, string? url)
+    {
+        var value = (url ?? "").Trim();
+        var problem = WebhookUrlProblem(value);
+        return new ActionSpec
+        {
+            Id = "webhook-add", Label = "Add deployment webhook", Armable = true, ArmIntent = value,
+            Available = site is not null && problem == "", Reason = site is null ? "not listed" : problem,
+            ArmedText = "press Y to call it after every deploy", Done = "Webhook added",
+            ScopeMessage = DeployScopeMessage,
+            Path = site is null ? "" : Paths.WebhookCreate(org, site.ServerId, site.Id),
+            Body = Obj(("url", value)),
+        };
+    }
+
+    public static ActionSpec DeleteWebhook(string org, Site? site, Webhook? webhook)
+    {
+        var listed = site is not null && webhook is not null;
+        return new ActionSpec
+        {
+            Id = "webhook-delete", Label = "Delete deployment webhook", Armable = true, ArmIntent = webhook?.Id ?? "",
+            Available = listed, Reason = "not listed",
+            ArmedText = "press Y to stop calling it", Done = "Webhook deleted",
+            Method = "DELETE", ScopeMessage = DeployScopeMessage,
+            Path = listed ? Paths.Webhook(org, site!.ServerId, site.Id, webhook!.Id) : "",
+        };
+    }
+
+    public static ActionSpec CreateDeployKey(string org, Site? site) => new()
+    {
+        Id = "deploy-key-create", Label = "Create deploy key", Armable = true,
+        Available = site is not null, Reason = "not listed",
+        ArmedText = "press Y to make a deploy key", Done = "Deploy key created",
+        ScopeMessage = DeployScopeMessage,
+        Path = site is null ? "" : Paths.DeployKey(org, site.ServerId, site.Id),
+    };
+
+    public static ActionSpec DeleteDeployKey(string org, Site? site) => new()
+    {
+        Id = "deploy-key-delete", Label = "Delete deploy key", Armable = true,
+        Available = site is not null, Reason = "not listed",
+        ArmedText = "press Y to delete the deploy key", Done = "Deploy key deleted",
+        Method = "DELETE", ScopeMessage = DeployScopeMessage,
+        Path = site is null ? "" : Paths.DeployKey(org, site.ServerId, site.Id),
+    };
 
     /// <summary>
     /// The row the command prompt arms. The text is trimmed once, here: Forge

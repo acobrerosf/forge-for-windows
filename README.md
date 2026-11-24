@@ -9,10 +9,11 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
 - **Flyout** (left-click the tray icon): servers and their sites, with search, organization tabs and
   chips for anything failed, deploying or in maintenance. Hover a row for Deploy and Open site, or
   right-click it for everything else. Works fully from the keyboard too.
-  - Site: deploy, maintenance mode, PHP-FPM reload, run a command, heartbeats, open site, open in Forge,
-    copy ssh, open ssh in Windows Terminal, and four sections: **Deployments** (every deployment and its log),
-    **Logs** (application, nginx error, nginx access; clear them too), **Scheduled jobs** (with the last run's output)
-    and **Config files** (opens the window's Config tab).
+  - Site: deploy, maintenance mode, quick deploy on or off, copy the deploy hook URL, PHP-FPM reload, run a
+    command, heartbeats, open site, open in Forge, copy ssh, open ssh in Windows Terminal, and five sections:
+    **Deployments** (every deployment and its log), **Logs** (application, nginx error, nginx access; clear them
+    too), **Scheduled jobs** (with the last run's output), **Config files** (opens the window's Config tab) and
+    **Deploy settings** (opens the window's Deploy tab).
   - Server: restart nginx, PHP-FPM, supervisor, redis and the database (only the services the server type
     runs), reboot, recipes, monitors, and four sections: **Events**, **Logs** (nginx, PHP, database, redis,
     ssh… only the ones the server can have; clear them too), **Background processes** (status and log;
@@ -28,6 +29,12 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
   now holds. The environment file's values are masked until you press **Reveal**, there's no "save to
   Downloads" for any of the three, and copying the environment file keeps it out of clipboard history.
   Line endings stay as Forge sent them.
+- **Deploy** (a site's tab in the window): turn quick deploy (push to deploy) on or off; copy or regenerate
+  the deploy hook URL; add, copy and delete deployment webhooks (the URLs Forge calls after a deploy); and
+  show, copy, create or delete the site's deploy key. The hook URL is a secret, since anyone holding it can
+  deploy: it is never shown, only copied, and kept out of clipboard history. Webhook URLs are shown by host
+  only, because they often carry a token. Regenerating the hook asks first and says that anything calling
+  the old URL (CI) stops working.
 - **Nothing extra on the poll.** History, logs, processes and jobs are read only when you open them.
 - **Toasts** when a deployment finishes or fails, with Open site, View log and Open in Forge buttons.
 - **Every write asks first** in a small dialog. Cancel has the focus, so Enter and Esc both drop it;
@@ -46,6 +53,8 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
 | `Ctrl+O` | open in a window |
 | `d` | deploy the current site (asks first) |
 | `m` | maintenance mode, on a site's page (asks first) |
+| `q` | quick deploy on or off, on a site's page (asks first) |
+| `u` | copy the site's deploy hook URL (kept out of clipboard history) |
 | `Y` | confirm what a dialog asks |
 | `o` / `f` / `s` / `t` | open site / open in Forge / copy ssh / ssh in Windows Terminal |
 | `e` | the server's events |
@@ -101,7 +110,8 @@ from the Actions tab builds the same files as a downloadable artifact, without m
 
 1. Create a token at <https://forge.laravel.com/profile/api>. Read access to servers and sites is enough
    to watch them, and to list deployments, background processes and scheduled jobs and read a job's output.
-   Each write scope is opt-in: `site:manage-deploys` (deploy, read deployment logs, read and edit the deploy script), `server:manage-services`,
+   Each write scope is opt-in: `site:manage-deploys` (deploy, read deployment logs, read and edit the deploy script,
+   quick deploy, the deploy hook, deployment webhooks and the deploy key), `server:manage-services`,
    `site:manage-commands`, `server:manage-logs` (read and clear site and server logs),
    `server:create-daemons` (read a background process's log and restart it), `recipe:view`, `recipe:manage`,
    `site:manage-environment` (read and edit the environment file) and `site:manage-nginx` (read and edit the
@@ -117,6 +127,8 @@ What is stored where:
 - **Everything else** (accounts, organizations, settings): `%LOCALAPPDATA%\ForgeForWindows\state.json`.
 - **Config files** (the environment file above all): never written to disk or to the app's log. They are
   held in memory only while the Config tab shows them.
+- **Deploy hook and webhook URLs:** never written to disk or to the app's log. The hook URL is read when
+  you copy it and goes straight to the clipboard.
 - **"Start with Windows":** `HKCU\...\Run\ForgeForWindows`. The app then starts with `--background`.
 
 ## Rate limit
@@ -128,6 +140,8 @@ Forge allows 60 requests a minute per Forge user, shared with your browser. The 
 - While a deploy runs, the app looks every 15 seconds instead of at the normal interval.
 - A 429 response pauses every organization behind that Forge user until Forge's reset time.
 - A config file costs 1 request when opened. A save costs 3: the check that it hasn't changed, the save, and reading it back.
+- The Deploy tab costs 2 requests when opened (webhooks and the deploy key). Copying the deploy hook URL costs 1.
+  Quick deploy's state comes with the site list, so it costs nothing.
 
 ## Build
 

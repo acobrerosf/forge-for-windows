@@ -97,6 +97,8 @@ public sealed partial class PanelWindow : Window
         ("Ctrl+O", "Open in a window"),
         ("d", "Deploy the current site"),
         ("m", "Maintenance mode (on a site)"),
+        ("q", "Quick deploy on or off (on a site)"),
+        ("u", "Copy the site's deploy hook URL"),
         ("Shift+Y", "Confirm what a dialog asks"),
         ("o  f", "Open site · open in Forge"),
         ("s  t", "Copy ssh · ssh in Windows Terminal"),
@@ -418,7 +420,13 @@ public sealed partial class PanelWindow : Window
         ["site-logs"] = "", ["server-logs"] = "", ["config"] = "",
     };
 
+    private static readonly Dictionary<string, string> DeployGlyphs = new()
+    {
+        ["quick-deploy"] = "", ["deploy-hook"] = "", ["deploy-settings"] = "",
+    };
+
     private static string GlyphFor(ActionSpec a) =>
+        DeployGlyphs.TryGetValue(a.Id, out var d) ? d :
         ActionGlyphs.TryGetValue(a.Id, out var g) ? g : a.Log != "" ? "" : "";
 
     /// <summary>Which titled section of a site's or server's page an action belongs in; "" leaves it off the list.</summary>
@@ -427,6 +435,7 @@ public sealed partial class PanelWindow : Window
         // Drawn as the page's buttons and switch instead.
         "deploy" or "open" or "maintenance" => "",
         "deployments" or "site-logs" or "site-schedule" or "events" or "server-logs" or "processes" or "schedule" => "Activity",
+        "quick-deploy" or "deploy-hook" or "deploy-settings" => "Deploys",
         "command" or "site-php-reload" or "heartbeats" or "config" => "Tools",
         "forge" or "ssh" or "ssh-terminal" => "Connect",
         "reboot" or "recipes" or "monitors" => "Server",
@@ -436,7 +445,7 @@ public sealed partial class PanelWindow : Window
     private List<RowItem> Sectioned(IEnumerable<RowItem> rows)
     {
         var list = new List<RowItem>();
-        string[] order = ["Activity", "Tools", "Services", "Server", "Connect"];
+        string[] order = ["Activity", "Deploys", "Tools", "Services", "Server", "Connect"];
         foreach (var group in rows.GroupBy(r => SectionOf((ActionSpec)r.Payload!)).Where(g => g.Key != "")
                      .OrderBy(g => Array.IndexOf(order, g.Key)))
         {
@@ -1170,7 +1179,7 @@ public sealed partial class PanelWindow : Window
                 _ => CurrentSite()?.Site.ServerId ?? "",
             };
             var subject = Top is NavServer ? CurrentServer()?.Server.Name ?? "this server"
-                : spec.Id == "maintenance" ? CurrentSite()?.Site.Name ?? "this site"
+                : spec.Id is "maintenance" or "quick-deploy" ? CurrentSite()?.Site.Name ?? "this site"
                 : _service.Snapshot.Org(org)?.ServerById(serverId)?.Name ?? "this server";
             var (title, body, cta) = WriteConfirm.Wording(spec, subject);
             Arm(row.ArmKey, title, body, cta, () => RowStillArmable(row.ArmKey), async () =>
@@ -1194,6 +1203,8 @@ public sealed partial class PanelWindow : Window
             case "schedule": OpenList(ListKind.ServerJobs); break;
             case "site-schedule": OpenList(ListKind.SiteJobs); break;
             case "config": OpenWindow("config"); break;
+            case "deploy-settings": OpenWindow("deploy"); break;
+            case "deploy-hook": CopyDeployHook(); break;
             case "forge": OpenForge(); break;
             case "ssh": CopySsh(); break;
             case "ssh-terminal": OpenTerminal(); break;
@@ -1760,6 +1771,8 @@ public sealed partial class PanelWindow : Window
                 break;
             case VirtualKey.D: ArmDeploy(); break;
             case VirtualKey.M: ArmMaintenance(); break;
+            case VirtualKey.Q: ArmQuickDeploy(); break;
+            case VirtualKey.U: CopyDeployHook(); break;
             case Slash when shift: KeysFlyout.ShowAt(KeysButton); break;
             case VirtualKey.O: OpenSite(); break;
             case VirtualKey.F: OpenForge(); break;
@@ -1835,6 +1848,7 @@ public sealed partial class PanelWindow : Window
                 Separator();
                 Item("Deployments", "", "", () => OpenList(ListKind.Deployments));
                 Item("Logs", "", "", () => OpenList(ListKind.SiteLogs));
+                Item("Copy deploy hook URL", "", "U", CopyDeployHook);
                 Separator();
                 Item("Copy ssh command", "", "S", CopySsh);
                 Item("Open ssh in Windows Terminal", "", "T", OpenTerminal);
@@ -1898,6 +1912,41 @@ public sealed partial class PanelWindow : Window
         if (Top is not NavSite nav) { Flash("Open a site first"); return; }
         var row = SiteActionRows(_service.Snapshot, nav).FirstOrDefault(r => r.Payload is ActionSpec { Id: "maintenance" });
         if (row?.Payload is ActionSpec spec) RunAction(row, spec);
+    }
+
+    private void ArmQuickDeploy()
+    {
+        if (Top is not NavSite nav) { Flash("Open a site first"); return; }
+        var row = SiteActionRows(_service.Snapshot, nav).FirstOrDefault(r => r.Payload is ActionSpec { Id: "quick-deploy" });
+        if (row?.Payload is ActionSpec spec) RunAction(row, spec);
+    }
+
+    private bool _copyingHook;
+
+    /// <summary>
+    /// Reads the deploy hook URL when asked and puts it on the clipboard, kept out of clipboard
+    /// history. It is never shown, flashed or logged: anyone holding it can deploy.
+    /// </summary>
+    private async void CopyDeployHook()
+    {
+        if (CurrentSite() is not { } cs) { Flash("Pick a site first"); return; }
+        if (_copyingHook) return;
+        _copyingHook = true;
+        try
+        {
+            var result = await _service.DeployHookUrlAsync(cs.Org, cs.Site);
+            if (!result.Ok) { Flash(result.Error!, bad: true); return; }
+            Shell.CopySecret(result.Value!);
+            Flash("Deploy hook URL copied for " + cs.Site.Name + ". It stays out of clipboard history.");
+        }
+        catch (Exception e)
+        {
+            Flash("Could not copy: " + e.Message, bad: true);
+        }
+        finally
+        {
+            _copyingHook = false;
+        }
     }
 
     private void MaintenanceSwitch_Toggled(object sender, RoutedEventArgs e)
