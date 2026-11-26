@@ -33,7 +33,7 @@ public sealed partial class PanelWindow : Window
     private readonly ForgeService _service;
     private readonly Action _openSettings;
     /// <summary>Opens the expanded window, on a site when given one (organization slug, site key).</summary>
-    private readonly Action<string?, string?, string?> _openWindow;
+    private readonly Action<string?, string?, string?, string?> _openWindow;
     private readonly List<Nav> _nav = [new NavTree()];
     private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
     private readonly DispatcherQueueTimer _flashTimer;
@@ -63,7 +63,7 @@ public sealed partial class PanelWindow : Window
     private long _hiddenAtMs;
     private IReadOnlyList<string>? _paneShown;
 
-    public PanelWindow(ForgeService service, Action openSettings, Action<string?, string?, string?> openWindow)
+    public PanelWindow(ForgeService service, Action openSettings, Action<string?, string?, string?, string?> openWindow)
     {
         _service = service;
         _openSettings = openSettings;
@@ -425,8 +425,15 @@ public sealed partial class PanelWindow : Window
         ["quick-deploy"] = "", ["deploy-hook"] = "", ["deploy-settings"] = "",
     };
 
+    /// <summary>Key (Permissions), shield and lock.</summary>
+    private static readonly Dictionary<string, string> AccessGlyphs = new()
+    {
+        ["ssh-keys"] = "", ["firewall"] = "", ["ssl"] = "",
+    };
+
     private static string GlyphFor(ActionSpec a) =>
         DeployGlyphs.TryGetValue(a.Id, out var d) ? d :
+        AccessGlyphs.TryGetValue(a.Id, out var x) ? x :
         ActionGlyphs.TryGetValue(a.Id, out var g) ? g : a.Log != "" ? "" : "";
 
     /// <summary>Which titled section of a site's or server's page an action belongs in; "" leaves it off the list.</summary>
@@ -436,6 +443,7 @@ public sealed partial class PanelWindow : Window
         "deploy" or "open" or "maintenance" => "",
         "deployments" or "site-logs" or "site-schedule" or "events" or "server-logs" or "processes" or "schedule" => "Activity",
         "quick-deploy" or "deploy-hook" or "deploy-settings" => "Deploys",
+        "ssh-keys" or "firewall" or "ssl" => "Access",
         "command" or "site-php-reload" or "heartbeats" or "config" => "Tools",
         "forge" or "ssh" or "ssh-terminal" => "Connect",
         "reboot" or "recipes" or "monitors" => "Server",
@@ -445,7 +453,7 @@ public sealed partial class PanelWindow : Window
     private List<RowItem> Sectioned(IEnumerable<RowItem> rows)
     {
         var list = new List<RowItem>();
-        string[] order = ["Activity", "Deploys", "Tools", "Services", "Server", "Connect"];
+        string[] order = ["Activity", "Deploys", "Tools", "Access", "Services", "Server", "Connect"];
         foreach (var group in rows.GroupBy(r => SectionOf((ActionSpec)r.Payload!)).Where(g => g.Key != "")
                      .OrderBy(g => Array.IndexOf(order, g.Key)))
         {
@@ -1204,6 +1212,9 @@ public sealed partial class PanelWindow : Window
             case "site-schedule": OpenList(ListKind.SiteJobs); break;
             case "config": OpenWindow("config"); break;
             case "deploy-settings": OpenWindow("deploy"); break;
+            case "ssl": OpenWindow("ssl"); break;
+            case "ssh-keys": OpenServerWindow("ssh-keys"); break;
+            case "firewall": OpenServerWindow("firewall"); break;
             case "deploy-hook": CopyDeployHook(); break;
             case "forge": OpenForge(); break;
             case "ssh": CopySsh(); break;
@@ -1899,6 +1910,13 @@ public sealed partial class PanelWindow : Window
     private void QuickDeploy_Click(object sender, RoutedEventArgs e) => OnRow(sender, ArmDeploy);
     private void QuickOpen_Click(object sender, RoutedEventArgs e) => OnRow(sender, OpenSite);
     private void QuickEvents_Click(object sender, RoutedEventArgs e) => OnRow(sender, () => OpenList(ListKind.Events));
+
+    /// <summary>Opens the server's page, as → does from the keyboard.</summary>
+    private void QuickServerPage_Click(object sender, RoutedEventArgs e) => OnRow(sender, () =>
+    {
+        if (CursorRow is { Kind: RowKind.Server, Payload: Server server } row)
+            Push(new NavServer { Org = row.Org, ServerId = server.Id });
+    });
     private void QuickTerminal_Click(object sender, RoutedEventArgs e) => OnRow(sender, OpenTerminal);
 
     private void QuickMore_Click(object sender, RoutedEventArgs e)
@@ -1999,7 +2017,15 @@ public sealed partial class PanelWindow : Window
     {
         var current = CurrentSite();
         HidePanel();
-        _openWindow(current?.Org, current?.Site.Key, tab);
+        _openWindow(current?.Org, current?.Site.Key, tab, null);
+    }
+
+    /// <summary>The expanded window on the current server's page, on <paramref name="tab"/> (SSH keys, Firewall).</summary>
+    private void OpenServerWindow(string tab)
+    {
+        if (CurrentServer() is not { } cs) { Flash("Pick a server first"); return; }
+        HidePanel();
+        _openWindow(cs.Org, null, tab, cs.Server.Id);
     }
 
     // ---------------------------------------------------------------- win32

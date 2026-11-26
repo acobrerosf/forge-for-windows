@@ -39,6 +39,12 @@ public sealed record ActionOutcome(bool Ok, string Message);
 public sealed record ReadResult<T>(T? Value, string? Error, string NextCursor = "")
 {
     public bool Ok => Error is null;
+
+    /// <summary>The token was rejected or lacks the scope (or the organization is gone): asking again won't help.</summary>
+    public bool Fatal { get; init; }
+
+    /// <summary>Not sent, to stay under the rate limit: asking again right away won't help either.</summary>
+    public bool Throttled { get; init; }
 }
 
 /// <summary>One look at a command or recipe run.</summary>

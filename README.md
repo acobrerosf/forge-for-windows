@@ -7,17 +7,18 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
   none, hollow (maintenance), pulsing (deploy running), amber (token or request problem),
   red (server unreachable or deploy failed). The tooltip summarises it.
 - **Flyout** (left-click the tray icon): servers and their sites, with search, organization tabs and
-  chips for anything failed, deploying or in maintenance. Hover a row for Deploy and Open site, or
-  right-click it for everything else. Works fully from the keyboard too.
+  chips for anything failed, deploying or in maintenance. Hover a site for Deploy and Open site, or a
+  server for its page (›), events and ssh; right-click either for everything else. Clicking a server folds
+  it. Works fully from the keyboard too.
   - Site: deploy, maintenance mode, quick deploy on or off, copy the deploy hook URL, PHP-FPM reload, run a
-    command, heartbeats, open site, open in Forge, copy ssh, open ssh in Windows Terminal, and five sections:
+    command, heartbeats, open site, open in Forge, copy ssh, open ssh in Windows Terminal, and six sections:
     **Deployments** (every deployment and its log), **Logs** (application, nginx error, nginx access; clear them
-    too), **Scheduled jobs** (with the last run's output), **Config files** (opens the window's Config tab) and
-    **Deploy settings** (opens the window's Deploy tab).
+    too), **Scheduled jobs** (with the last run's output), **Config files** (opens the window's Config tab),
+    **Deploy settings** (opens the window's Deploy tab) and **SSL certificates** (opens the window's SSL tab).
   - Server: restart nginx, PHP-FPM, supervisor, redis and the database (only the services the server type
     runs), reboot, recipes, monitors, and four sections: **Events**, **Logs** (nginx, PHP, database, redis,
     ssh… only the ones the server can have; clear them too), **Background processes** (status and log;
-    restart one) and **Scheduled jobs**.
+    restart one) and **Scheduled jobs**. **SSH keys** and **Firewall** open the window's tabs of the same name.
 - **Window** (the flyout's ⧉ button, Ctrl+O, or the tray menu): the same servers and sites with room to read.
   Each section is one tab laid out the same way: the list on the left, and beside it the output of the
   chosen item, with find, wrap, copy and save. A tab opens on its first item (the newest deployment or
@@ -35,7 +36,20 @@ A tray app for watching and managing Laravel Forge servers on Windows. It's a po
   deploy: it is never shown, only copied, and kept out of clipboard history. Webhook URLs are shown by host
   only, because they often carry a token. Regenerating the hook asks first and says that anything calling
   the old URL (CI) stops working.
-- **Nothing extra on the poll.** History, logs, processes and jobs are read only when you open them.
+- **SSH keys** (a server's tab in the window): the keys added through Forge, each with its server user and
+  status, and **Add my key**: pick one of the `.pub` files in `%USERPROFILE%\.ssh`, choose a `.pub` file
+  anywhere else, or paste a public key; name it (your machine's name to start with) and choose the server user (`forge` to start with). Only
+  `.pub` files are ever read, and a pasted private key is refused. Once the key is added, **Open ssh in
+  Windows Terminal** signs you in. The tab also shows the server's own public key, with Copy.
+- **Firewall** (a server's tab in the window): the rules, and adding one (name, port or `from:to` range,
+  allow or deny, and the addresses it applies to, or any). **Look up my IP** asks api.ipify.org for your
+  public address, but only when you press it, and only fills the box so you can check it. Every
+  confirmation names the port and the address, and removing a rule for the server's ssh port, or blocking
+  it, warns that it can lock you out.
+- **SSL** (a site's tab in the window): each of the site's domains with its active certificate's state.
+  A failed or pending certificate request is listed first: Let's Encrypt renews by itself, so a failed
+  request is the one to fix. Read only when the tab opens.
+- **Nothing extra on the poll.** History, logs, processes, jobs, keys, firewall rules and certificates are read only when you open them.
 - **Toasts** when a deployment finishes or fails, with Open site, View log and Open in Forge buttons.
 - **Every write asks first** in a small dialog. Cancel has the focus, so Enter and Esc both drop it;
   only the dialog's own button, or a capital **Y**, sends it.
@@ -108,15 +122,29 @@ from the Actions tab builds the same files as a downloadable artifact, without m
 
 ## Setup
 
-1. Create a token at <https://forge.laravel.com/profile/api>. Read access to servers and sites is enough
-   to watch them, and to list deployments, background processes and scheduled jobs and read a job's output.
-   Each write scope is opt-in: `site:manage-deploys` (deploy, read deployment logs, read and edit the deploy script,
-   quick deploy, the deploy hook, deployment webhooks and the deploy key), `server:manage-services`,
-   `site:manage-commands`, `server:manage-logs` (read and clear site and server logs),
-   `server:create-daemons` (read a background process's log and restart it), `recipe:view`, `recipe:manage`,
-   `site:manage-environment` (read and edit the environment file) and `site:manage-nginx` (read and edit the
-   site's nginx config).
-   A view whose scope is missing says which one it needs.
+1. Create a token at <https://forge.laravel.com/profile/api> with only the scopes you will use. Don't
+   tick "Select all permissions": the app uses nothing beyond the list below. Settings shows the same
+   list under **Which scopes?**, and a view whose scope is missing says which one it needs.
+
+   | Scope | Needed? | What it turns on |
+   |---|---|---|
+   | `user:view` | **needed** | checking the token: who it belongs to |
+   | `organization:view` | **needed** | listing your organizations |
+   | `server:view` | **needed** | watching servers and sites; events, logs, processes, jobs, SSH keys and firewall rules |
+   | `site:manage-deploys` | optional | deploy, deployment logs, the deploy script, quick deploy, the deploy hook, webhooks and the deploy key |
+   | `site:manage-commands` | optional | run commands, and maintenance mode |
+   | `site:manage-environment` | optional | read and edit the environment file |
+   | `site:manage-nginx` | optional | read and edit the site's nginx config |
+   | `site:manage-ssl` | optional | read certificates on the SSL tab, if Forge asks for it |
+   | `server:manage-services` | optional | restart nginx, PHP-FPM, supervisor, redis and the database, and reboot |
+   | `server:manage-logs` | optional | read and clear site and server logs |
+   | `server:create-daemons` | optional | read a background process's log and restart it |
+   | `server:create-keys` | optional | add SSH keys |
+   | `server:delete-keys` | optional | remove SSH keys |
+   | `server:manage-network` | optional | add and remove firewall rules |
+   | `recipe:view` | optional | list recipes |
+   | `recipe:manage` | optional | run recipes |
+
 2. Start the app. On first run Settings opens. Paste the token, press **Check token**, pick the
    organizations to watch, then press **Save account**.
 
@@ -129,6 +157,9 @@ What is stored where:
   held in memory only while the Config tab shows them.
 - **Deploy hook and webhook URLs:** never written to disk or to the app's log. The hook URL is read when
   you copy it and goes straight to the clipboard.
+- **SSH keys:** the app reads only the `.pub` files at the top of `%USERPROFILE%\.ssh`, when the SSH keys
+  tab opens, and a `.pub` file you choose yourself. It never opens a private key file, and never stores what it read.
+- **Your public IP:** looked up from api.ipify.org only when you press **Look up my IP**. It is not stored or logged.
 - **"Start with Windows":** `HKCU\...\Run\ForgeForWindows`. The app then starts with `--background`.
 
 ## Rate limit
@@ -142,6 +173,14 @@ Forge allows 60 requests a minute per Forge user, shared with your browser. The 
 - A config file costs 1 request when opened. A save costs 3: the check that it hasn't changed, the save, and reading it back.
 - The Deploy tab costs 2 requests when opened (webhooks and the deploy key). Copying the deploy hook URL costs 1.
   Quick deploy's state comes with the site list, so it costs nothing.
+- The SSH keys tab costs 2 requests when opened (the keys and the server's own key, which is read once per visit
+  to the server, and not asked again when that read fails). After that it costs 1. The Firewall tab costs 1.
+  After a key or rule is added or removed the tab reads again, and while one is still installing it looks again
+  up to 3 times, 8 seconds apart. Only a write starts those extra looks; opening a tab never does.
+- The SSL tab costs 1 request for the domains plus 1 per domain, for up to 10 domains; **Check more** reads the next 10,
+  and fetches the next page of domains (1 request per 30) once the first page is done. A check that Forge refuses
+  (a missing scope or a rejected token) or that is held back for the rate limit stops the batch; **Check more** retries
+  the domains it didn't reach. Certificates are never checked on the poll.
 
 ## Build
 

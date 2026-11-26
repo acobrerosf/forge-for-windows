@@ -138,6 +138,34 @@ public static class Paths
     public static string CommandOutput(string org, string serverId, string siteId, string commandId) =>
         Command(org, serverId, siteId, commandId) + "/output";
 
+    // -------------------------------------------------------------- access
+
+    /// <summary>The keys that may sign in to the server, each for one server user.</summary>
+    public static string SshKeys(string org, string serverId, string? cursor = null) =>
+        Paged(Server(org, serverId) + "/ssh-keys", cursor);
+
+    public static string SshKeyCreate(string org, string serverId) => Server(org, serverId) + "/ssh-keys";
+
+    public static string SshKey(string org, string serverId, string keyId) =>
+        Server(org, serverId) + "/ssh-keys/" + E(keyId);
+
+    /// <summary>The server's own public key: GET answers <c>public_key</c>.</summary>
+    public static string ServerKey(string org, string serverId) => Server(org, serverId) + "/key";
+
+    public static string FirewallRules(string org, string serverId, string? cursor = null) =>
+        Paged(Server(org, serverId) + "/firewall-rules", cursor);
+
+    public static string FirewallRuleCreate(string org, string serverId) => Server(org, serverId) + "/firewall-rules";
+
+    public static string FirewallRule(string org, string serverId, string ruleId) =>
+        Server(org, serverId) + "/firewall-rules/" + E(ruleId);
+
+    public static string Domains(string org, string serverId, string siteId, string? cursor = null) =>
+        Paged(Site(org, serverId, siteId) + "/domains", cursor);
+
+    public static string ActiveCertificate(string org, string serverId, string siteId, string domainId) =>
+        Site(org, serverId, siteId) + "/domains/" + E(domainId) + "/certificates/active";
+
     public static string Recipes(string org, string? cursor = null) => Paged($"/orgs/{E(org)}/recipes", cursor);
 
     public static string RecipeRuns(string org, string recipeId) => $"/orgs/{E(org)}/recipes/{E(recipeId)}/runs";

@@ -22,19 +22,31 @@ public sealed partial class ForgeService
     private async Task<(ForgeEnvelope? Env, string? Error, bool Fatal)> ReadAsync(string slug, string path, string scope403, CancellationToken ct,
         bool force = false)
     {
+        var (env, error, fatal, _) = await ReadFullAsync(slug, path, scope403, ct, force).ConfigureAwait(false);
+        return (env, error, fatal);
+    }
+
+    /// <summary><see cref="ReadAsync"/>, also saying whether the read was held back for the rate limit.</summary>
+    private async Task<(ForgeEnvelope? Env, string? Error, bool Fatal, bool Throttled)> ReadFullAsync(string slug, string path, string scope403,
+        CancellationToken ct, bool force = false, bool notFoundOk = false)
+    {
         string account;
         lock (_lock)
         {
-            if (!_orgs.TryGetValue(slug, out var st)) return (null, "That organization is no longer watched", true);
+            if (!_orgs.TryGetValue(slug, out var st)) return (null, "That organization is no longer watched", true, false);
             account = st.Account;
         }
         var env = await RequestAsync(account, "GET", path, null, force, ct).ConfigureAwait(false);
-        if (env.Ok) return (env, null, false);
-        if (env.MissingToken) { Publish(); return (null, env.ErrorMessage, true); }
-        if (env.Status == 401) return (null, "Forge rejected the token", true);
-        if (env.Status == 403) return (null, scope403, true);
-        return (null, env.ErrorMessage, false);
+        if (env.Ok || notFoundOk && env.Status == 404) return (env, null, false, false);
+        if (env.MissingToken) { Publish(); return (null, env.ErrorMessage, true, false); }
+        if (env.Status == 401) return (null, "Forge rejected the token", true, false);
+        if (env.Status == 403) return (null, scope403, true, false);
+        return (null, env.ErrorMessage, false, env.Throttled);
     }
+
+    /// <summary>A failed read as a result, carrying whether asking again could help.</summary>
+    private static ReadResult<T> Failed<T>(string error, bool fatal, bool throttled) =>
+        new(default, error) { Fatal = fatal, Throttled = throttled };
 
     private async Task<ReadResult<IReadOnlyList<string>>> DocumentAsync(string slug, string path, string field, string scope,
         Func<string, string>? shape, CancellationToken ct)
@@ -81,8 +93,8 @@ public sealed partial class ForgeService
 
     private async Task<ReadResult<List<T>>> ListAsync<T>(string slug, string path, string scope, Func<System.Text.Json.Nodes.JsonNode?, List<T>> parse, CancellationToken ct)
     {
-        var (env, error, _) = await ReadAsync(slug, path, scope, ct).ConfigureAwait(false);
-        if (error is not null) return new(null, error);
+        var (env, error, fatal, throttled) = await ReadFullAsync(slug, path, scope, ct).ConfigureAwait(false);
+        if (error is not null) return Failed<List<T>>(error, fatal, throttled);
         return new(parse(env!.Body), null, Parse.NextCursor(env.Body));
     }
 

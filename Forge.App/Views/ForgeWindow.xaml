@@ -200,6 +200,7 @@
                             <SelectorBarItem Text="Schedule" Tag="schedule" />
                             <SelectorBarItem Text="Config" Tag="config" />
                             <SelectorBarItem Text="Deploy" Tag="deploy" />
+                            <SelectorBarItem Text="SSL" Tag="ssl" />
                             <SelectorBarItem Text="Heartbeats" Tag="heartbeats" />
                             <SelectorBarItem Text="Run a command" Tag="command" />
                         </SelectorBar>
@@ -362,6 +363,20 @@
                                 </StackPanel>
                             </ScrollViewer>
 
+                            <!-- The site's domains and each one's active certificate. Read when the tab opens: one request per domain. -->
+                            <ScrollViewer x:Name="SslPanel" Visibility="Collapsed">
+                                <StackPanel Spacing="12" Padding="0,0,0,8" MaxWidth="760" HorizontalAlignment="Left">
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Certificates" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock x:Name="CertificatesText" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                            <StackPanel x:Name="CertificateRows" Spacing="6" />
+                                            <Button x:Name="CertificatesMoreButton" Click="CertificatesMore_Click" Visibility="Collapsed" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+
                             <Grid x:Name="HeartbeatsPanel" Visibility="Collapsed" RowSpacing="8">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
@@ -439,6 +454,8 @@
                             <SelectorBarItem Text="Logs" Tag="logs" />
                             <SelectorBarItem Text="Processes" Tag="processes" />
                             <SelectorBarItem Text="Schedule" Tag="schedule" />
+                            <SelectorBarItem Text="SSH keys" Tag="ssh-keys" />
+                            <SelectorBarItem Text="Firewall" Tag="firewall" />
                         </SelectorBar>
                         <Grid Grid.Row="2">
                             <ScrollViewer x:Name="ServicesPanel">
@@ -452,6 +469,109 @@
                                                ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
                             <local:ListLogPane x:Name="ServerJobs" Visibility="Collapsed" ListName="Scheduled jobs"
                                                ItemTemplate="{StaticResource EntryTemplate}" ItemContainerStyle="{StaticResource EntryContainer}" />
+
+                            <!-- Who may sign in: the keys on the server, adding this machine's key, and the server's own key. -->
+                            <ScrollViewer x:Name="SshKeysPanel" Visibility="Collapsed">
+                                <StackPanel Spacing="12" Padding="0,0,0,8" MaxWidth="760" HorizontalAlignment="Left">
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Keys that can sign in" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock x:Name="SshKeysText" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                            <StackPanel x:Name="SshKeyRows" Spacing="4" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Add my key" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock x:Name="LocalKeysText" Style="{StaticResource Caption}" TextWrapping="Wrap"
+                                                       Text="Pick a public key from your .ssh folder, choose a .pub file elsewhere, or paste one. Only .pub files are read: a private key never leaves this machine." />
+                                            <ComboBox x:Name="LocalKeyBox" HorizontalAlignment="Stretch" SelectionChanged="LocalKeyBox_SelectionChanged"
+                                                      AutomationProperties.Name="Public key" />
+                                            <TextBox x:Name="PasteKeyBox" Visibility="Collapsed" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                                     PlaceholderText="ssh-ed25519 AAAA... you@machine" IsSpellCheckEnabled="False" TextWrapping="Wrap"
+                                                     TextChanged="AccessInput_Changed" AutomationProperties.Name="Paste a public key" />
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="160" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="KeyNameBox" Header="Name" IsSpellCheckEnabled="False" TextChanged="AccessInput_Changed" />
+                                                <TextBox Grid.Column="1" x:Name="KeyUserBox" Header="Server user" Text="forge" IsSpellCheckEnabled="False"
+                                                         TextChanged="AccessInput_Changed" />
+                                                <Button Grid.Column="2" x:Name="AddKeyButton" Content="Add…" VerticalAlignment="Bottom" Click="AddKey_Click" />
+                                            </Grid>
+                                            <TextBlock x:Name="AddKeyText" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                            <Button x:Name="AddedKeyTerminalButton" Visibility="Collapsed" Click="Terminal_Click">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE756;" />
+                                                    <TextBlock Text="Open ssh in Windows Terminal" />
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Server key" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock x:Name="ServerKeyState" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                            <TextBlock x:Name="ServerKeyText" FontFamily="{StaticResource MonoFont}" FontSize="12" TextWrapping="Wrap"
+                                                       IsTextSelectionEnabled="True" MaxLines="4" TextTrimming="CharacterEllipsis" Visibility="Collapsed" />
+                                            <Button x:Name="ServerKeyCopyButton" Content="Copy public key" Click="ServerKeyCopy_Click" Visibility="Collapsed" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+
+                            <!-- The firewall's rules, and adding one. -->
+                            <ScrollViewer x:Name="FirewallPanel" Visibility="Collapsed">
+                                <StackPanel Spacing="12" Padding="0,0,0,8" MaxWidth="760" HorizontalAlignment="Left">
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Rules" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <TextBlock x:Name="FirewallText" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                            <StackPanel x:Name="FirewallRows" Spacing="4" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="Add a rule" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="140" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="RuleNameBox" Header="Name" PlaceholderText="Office" IsSpellCheckEnabled="False"
+                                                         TextChanged="AccessInput_Changed" />
+                                                <TextBox Grid.Column="1" x:Name="RulePortBox" Header="Port" PlaceholderText="22 or 8000:8010"
+                                                         IsSpellCheckEnabled="False" TextChanged="AccessInput_Changed" />
+                                                <ComboBox Grid.Column="2" x:Name="RuleTypeBox" Header="Type" SelectedIndex="0" MinWidth="110"
+                                                          SelectionChanged="RuleType_Changed">
+                                                    <ComboBoxItem Content="Allow" Tag="allow" />
+                                                    <ComboBoxItem Content="Deny" Tag="deny" />
+                                                </ComboBox>
+                                            </Grid>
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="RuleIpBox" Header="From" PlaceholderText="Any address, or 203.0.113.7, 198.51.100.0/24"
+                                                         IsSpellCheckEnabled="False" TextChanged="AccessInput_Changed" />
+                                                <Button Grid.Column="1" x:Name="LookUpIpButton" VerticalAlignment="Bottom" Click="LookUpIp_Click"
+                                                        Content="Look up my IP (api.ipify.org)"
+                                                        ToolTipService.ToolTip="Asks api.ipify.org for this machine's public address. Nothing is sent until you press it." />
+                                                <Button Grid.Column="2" x:Name="AddRuleButton" Content="Add…" VerticalAlignment="Bottom" Click="AddRule_Click" />
+                                            </Grid>
+                                            <TextBlock x:Name="AddRuleText" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
                         </Grid>
                     </Grid>
 

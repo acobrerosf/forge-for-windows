@@ -99,6 +99,28 @@ public sealed record Heartbeat
 /// <summary>A URL Forge calls after each deploy. It may carry a token (Slack, Discord), so it is treated as a secret.</summary>
 public sealed record Webhook(string Id, string Url, string CreatedAt);
 
+/// <summary>A key that may sign in to a server as <see cref="User"/>. <see cref="Status"/> is installing, installed or removing.</summary>
+public sealed record SshKey(string Id, string Name, string User, string Status, string CreatedBy, string CreatedAt);
+
+/// <summary>
+/// One rule of the server's firewall. <see cref="Port"/> is one port or a <c>from:to</c> range;
+/// <see cref="IpAddress"/> is "" for any address, or a comma-separated list. <see cref="Type"/> is allow or deny.
+/// </summary>
+public sealed record FirewallRule(string Id, string Name, string Port, string IpAddress, string Type, string Status, string CreatedAt);
+
+/// <summary>A name the site answers to. <see cref="Type"/> is primary or alias.</summary>
+public sealed record SiteDomain(string Id, string Name, string Status, string Type);
+
+/// <summary>
+/// A domain's active certificate. <see cref="RequestStatus"/> reports the last issue or renewal
+/// request (Let's Encrypt renews by itself, so a failed request is what needs attention).
+/// <see cref="ExpiresAt"/> is "" when Forge doesn't report it.
+/// </summary>
+public sealed record Certificate(string Id, string Type, string Status, string RequestStatus, string KeyType, bool Active, string ExpiresAt);
+
+/// <summary>One row of the SSL tab: the domain, and its active certificate once read (null when it has none).</summary>
+public sealed record DomainCertificate(SiteDomain Domain, Certificate? Certificate, string Error);
+
 /// <summary>One row of a site's deployment history.</summary>
 public sealed record Deployment
 {

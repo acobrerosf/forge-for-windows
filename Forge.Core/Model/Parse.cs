@@ -269,6 +269,58 @@ public static partial class Parse
     public static string? DeployKey(JsonNode? body) =>
         Attributes(body) is JsonObject attrs && attrs.ContainsKey("key") ? ResourceText(body, "key") ?? "" : null;
 
+    // -------------------------------------------------------------- access
+
+    /// <summary>As Forge lists them; a row with no id cannot be deleted and is dropped.</summary>
+    public static List<SshKey> SshKeys(JsonNode? body) =>
+        Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                return new SshKey(Json.Str(Json.Get(r, "id")), Json.Str(Json.Get(a, "name")), Json.Str(Json.Get(a, "user")),
+                    Json.Str(Json.Get(a, "status")), Json.Str(Json.Get(a, "created_by")), Json.Str(Json.Get(a, "created_at")));
+            })
+            .Where(k => k.Id != "")
+            .ToList();
+
+    /// <summary>Ordered by port, as a reader looks them up; a row with no id is dropped.</summary>
+    public static List<FirewallRule> FirewallRules(JsonNode? body) =>
+        Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                return new FirewallRule(Json.Str(Json.Get(r, "id")), Json.Str(Json.Get(a, "name")), Json.Str(Json.Get(a, "port")),
+                    Json.Str(Json.Get(a, "ip_address")), Json.Str(Json.Get(a, "type")).ToLowerInvariant(),
+                    Json.Str(Json.Get(a, "status")), Json.Str(Json.Get(a, "created_at")));
+            })
+            .Where(f => f.Id != "")
+            .OrderBy(f => int.TryParse(f.Port.Split(':')[0], out var n) ? n : int.MaxValue)
+            .ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    /// <summary>The primary domain first, then aliases by name.</summary>
+    public static List<SiteDomain> Domains(JsonNode? body) =>
+        Json.Items(body, "data")
+            .Select(r =>
+            {
+                var a = Json.Get(r, "attributes");
+                return new SiteDomain(Json.Str(Json.Get(r, "id")), Json.Str(Json.Get(a, "name")),
+                    Json.Str(Json.Get(a, "status")), Json.Str(Json.Get(a, "type")));
+            })
+            .Where(d => d.Id != "" && d.Name != "")
+            .OrderBy(d => d.Type == "primary" ? 0 : 1)
+            .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    /// <summary>The domain's active certificate, or null when the answer carries none.</summary>
+    public static Certificate? ActiveCertificate(JsonNode? body)
+    {
+        if (Attributes(body) is not JsonObject a) return null;
+        return new Certificate(Json.Str(Json.Get(body, "data", "id")), Json.Str(Json.Get(a, "type")), Json.Str(Json.Get(a, "status")),
+            Json.Str(Json.Get(a, "request_status")), Json.Str(Json.Get(a, "key_type")),
+            Json.IsTrue(Json.Get(a, "active")), Json.Str(Json.Get(a, "expires_at")));
+    }
+
     /// <summary>Broken ones first, so a stopped or failed process is at the top of the list.</summary>
     public static List<BackgroundProcess> BackgroundProcesses(JsonNode? body) =>
         Json.Items(body, "data")

@@ -72,6 +72,11 @@
                             </Button>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="2" Visibility="{x:Bind ServerActionsVisibility}">
+                            <!-- A click on the row folds it, as Enter does; this is the mouse's way to the server's page (→). -->
+                            <Button Style="{StaticResource IconButton}" Tag="{x:Bind Key}" Click="QuickServerPage_Click"
+                                    ToolTipService.ToolTip="Server actions (→)" AutomationProperties.Name="Server actions">
+                                <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE76C;" />
+                            </Button>
                             <Button Style="{StaticResource IconButton}" Tag="{x:Bind Key}" Click="QuickEvents_Click"
                                     ToolTipService.ToolTip="Server events (E)" AutomationProperties.Name="Server events">
                                 <FontIcon FontFamily="{StaticResource IconFont}" FontSize="14" Glyph="&#xE81C;" />

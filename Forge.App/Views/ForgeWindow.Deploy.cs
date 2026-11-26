@@ -127,6 +127,20 @@ public sealed partial class ForgeWindow
         }
     }
 
+    /// <summary>Copies text that may be seen, such as a public key: it stays in clipboard history.</summary>
+    private void CopyPublic(string text, string done)
+    {
+        try
+        {
+            Shell.CopyText(text);
+            Flash(done);
+        }
+        catch (Exception e)
+        {
+            Flash("Could not copy: " + e.Message, bad: true);
+        }
+    }
+
     private void CopySecret(string text, string done)
     {
         try
@@ -224,16 +238,7 @@ public sealed partial class ForgeWindow
 
     private void DeployKeyCopy_Click(object sender, RoutedEventArgs e)
     {
-        if (_deployKey is not { Length: > 0 } key) return;
-        try
-        {
-            Shell.CopyText(key);
-            Flash("Public deploy key copied");
-        }
-        catch (Exception ex)
-        {
-            Flash("Could not copy: " + ex.Message, bad: true);
-        }
+        if (_deployKey is { Length: > 0 } key) CopyPublic(key, "Public deploy key copied");
     }
 
     private void DeployKeyCreate_Click(object sender, RoutedEventArgs e)

@@ -222,7 +222,8 @@ public static class Status
         return (s.Replace('-', ' '), tone);
     }
 
-    internal static int ProcessRank(BackgroundProcess p) => ProcessStatus(p).Tone switch
+    /// <summary>The order lists sort by: broken first, then needing a look, in progress, quiet, and fine last.</summary>
+    public static int ToneRank(Tone tone) => tone switch
     {
         Tone.Bad => 0,
         Tone.Warn => 1,
@@ -231,6 +232,8 @@ public static class Status
         _ => 4,
     };
 
+    internal static int ProcessRank(BackgroundProcess p) => ToneRank(ProcessStatus(p).Tone);
+
     public static string ProcessDetail(BackgroundProcess p)
     {
         var parts = new List<string>();
@@ -238,6 +241,67 @@ public static class Status
         if (p.Processes > 1) parts.Add($"{p.Processes} processes");
         if (p.Directory != "") parts.Add(p.Directory);
         return string.Join(" · ", parts);
+    }
+
+    // -------------------------------------------------------------- access
+
+    /// <summary>An SSH key's or firewall rule's state: installed is quiet, a word ending in -ing is in progress, failed is broken.</summary>
+    public static (string Label, Tone Tone) AccessStatus(string? status)
+    {
+        var s = Words(status);
+        if (s == "") return ("", Tone.Idle);
+        var tone = s.Contains("fail", StringComparison.Ordinal) ? Tone.Bad
+            : s is "installed" or "active" ? Tone.Ok
+            : s.EndsWith("ing", StringComparison.Ordinal) ? Tone.Busy : Tone.Idle;
+        return (s, tone);
+    }
+
+    /// <summary>A status as words: lower case, with <c>_</c> and <c>-</c> as spaces.</summary>
+    private static string Words(string? s) => (s ?? "").ToLowerInvariant().Replace('_', ' ').Replace('-', ' ');
+
+    private static bool Failed(string words) =>
+        words.Contains("fail", StringComparison.Ordinal) || words.Contains("error", StringComparison.Ordinal);
+
+    private static bool Pending(string words) =>
+        words.EndsWith("ing", StringComparison.Ordinal) || words is "pending" or "queued";
+
+    /// <summary>Within this many days of expiry a certificate is worth a look, even if it should renew itself.</summary>
+    public const int CertificateWarnDays = 14;
+
+    /// <summary>
+    /// A domain's certificate health. A failed request is the thing to show: Let's Encrypt renews
+    /// on its own, so a certificate whose renewal failed is the one that will lapse. Expiry is
+    /// judged only when Forge reports it.
+    /// </summary>
+    public static (string Label, Tone Tone) CertificateStatus(DomainCertificate row, long nowMs)
+    {
+        if (row.Error != "") return (row.Error, Tone.Idle);
+        if (row.Certificate is not { } c) return ("no certificate", Tone.Idle);
+        var request = Words(c.RequestStatus);
+        var status = Words(c.Status);
+        if (Failed(request)) return ("request " + request, Tone.Bad);
+        if (Failed(status)) return (status, Tone.Bad);
+        if (Pending(request)) return ("request " + request, Tone.Busy);
+        if (Pending(status)) return (status, Tone.Busy);
+        if (Json.ParseIsoMs(c.ExpiresAt) is { } expires)
+        {
+            var days = (expires - nowMs) / 86_400_000.0;
+            if (days < 0) return ("expired", Tone.Bad);
+            if (days < CertificateWarnDays) return ($"expires in {Math.Max(1, (int)Math.Ceiling(days))} days", Tone.Warn);
+        }
+        return (status == "" ? (c.Active ? "active" : "inactive") : status, c.Active || status is "installed" or "active" ? Tone.Ok : Tone.Idle);
+    }
+
+    /// <summary>Broken first, then in progress and near expiry, then the rest, so a failing certificate tops the tab.</summary>
+    public static int CertificateRank(DomainCertificate row, long nowMs) => ToneRank(CertificateStatus(row, nowMs).Tone);
+
+    /// <summary>What kind of certificate it is: "Let's Encrypt · ECDSA", say.</summary>
+    public static string CertificateDetail(Certificate? c)
+    {
+        if (c is null) return "";
+        var kind = c.Type.ToLowerInvariant() is "letsencrypt" or "lets-encrypt" or "lets_encrypt" ? "Let's Encrypt" : Words(c.Type);
+        var key = c.KeyType.ToUpperInvariant();
+        return string.Join(" · ", new[] { kind, key }.Where(s => s != ""));
     }
 
     // ------------------------------------------------------ scheduled jobs

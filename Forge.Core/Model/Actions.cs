@@ -42,6 +42,11 @@ public sealed record ActionSpec
     /// <summary>For a clear-log write: which log it empties.</summary>
     public string Log { get; init; } = "";
     public string RecipeId { get; init; } = "";
+    /// <summary>
+    /// The confirm dialog's title, body and button, when the write words its own: a firewall
+    /// rule's names the port and address it is about, which a generic dialog can't.
+    /// </summary>
+    public (string Title, string Body, string Cta)? Wording { get; init; }
 }
 
 public static partial class Actions
@@ -313,6 +318,9 @@ public static partial class Actions
             new() { Id = "schedule", Label = "Scheduled jobs", Available = server is not null, Reason = "not listed" },
             new() { Id = "recipes", Label = "Run a recipe…" },
             new() { Id = "monitors", Label = "Monitors" },
+            // Each opens the window's tab of the same name: keys and rules are read and changed there.
+            new() { Id = "ssh-keys", Label = "SSH keys…", Available = server is not null, Reason = "not listed" },
+            new() { Id = "firewall", Label = "Firewall…", Available = server is not null, Reason = "not listed" },
             new() { Id = "forge", Label = "Open in Forge", Hint = "f" },
             new() { Id = "ssh", Label = "Copy ssh command", Hint = "s",
                 Available = ssh != "", Reason = ssh != "" ? "" : "no public IP" },
@@ -362,6 +370,8 @@ public static partial class Actions
             new() { Id = "deploy-hook", Label = "Copy deploy hook URL", Hint = "u", Available = site is not null, Reason = "not listed" },
             // Opens the window's Deploy tab: hook, webhooks and deploy key are managed there.
             new() { Id = "deploy-settings", Label = "Deploy settings…", Available = site is not null, Reason = "not listed" },
+            // Opens the window's SSL tab, which reads the domains and their certificates.
+            new() { Id = "ssl", Label = "SSL certificates…", Available = site is not null, Reason = "not listed" },
             new() { Id = "site-php-reload", Label = "Reload PHP-FPM" + (pool != "" ? $" ({pool})" : ""),
                 Armable = true, ArmIntent = pool, Available = pool != "",
                 Reason = site is null ? "not listed" : site.PhpVersion != "" ? "unknown PHP version" : "no PHP version reported",

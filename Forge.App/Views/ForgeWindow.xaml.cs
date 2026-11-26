@@ -159,11 +159,12 @@ public sealed partial class ForgeWindow : Window
     /// Shows the window, on a given site when one is named (from the flyout's current site, say),
     /// and on one of its tabs when <paramref name="tab"/> names one (the flyout's "Config files…").
     /// </summary>
-    public void ShowAndFocus(string? org = null, string? siteKey = null, string? tab = null)
+    public void ShowAndFocus(string? org = null, string? siteKey = null, string? tab = null, string? serverId = null)
     {
         AppWindow.Show();
         Activate();
-        if (!string.IsNullOrEmpty(org) && !string.IsNullOrEmpty(siteKey)) GoToSite(org, siteKey, tab);
+        if (!string.IsNullOrEmpty(org) && !string.IsNullOrEmpty(serverId)) GoToServer(org, serverId, tab);
+        else if (!string.IsNullOrEmpty(org) && !string.IsNullOrEmpty(siteKey)) GoToSite(org, siteKey, tab);
         else if (!_choseOnce) ChooseSomethingUseful();
         _choseOnce = true;
     }
@@ -175,6 +176,15 @@ public sealed partial class ForgeWindow : Window
         if (!same && !await MayLeaveConfigAsync()) return;
         if (!same) SelectSite(org, siteKey, tab);
         else if (tab is not null && tab != _siteTab) ShowSiteTab(tab);
+    }
+
+    /// <summary>Moves to a server's page (the flyout's "SSH keys…", say), on <paramref name="tab"/> when it names one.</summary>
+    private async void GoToServer(string org, string serverId, string? tab = null)
+    {
+        var same = _org == org && _siteKey == "" && _serverId == serverId;
+        if (!same && !await MayLeaveConfigAsync()) return;
+        if (!same) SelectServer(org, serverId, tab);
+        else if (tab != _serverTab && IsServerTab(tab)) ShowServerTab(tab);
     }
 
     /// <summary>True when nothing unsaved would be lost, or the reader chose to drop it.</summary>
@@ -394,6 +404,7 @@ public sealed partial class ForgeWindow : Window
         SiteJobs.Reset();
         SiteConfig.Reset();
         ResetDeploy();
+        ResetCertificates();
         _followTone = null;
         // A site with a failed deploy opens on the log that says why, unless a tab was asked for.
         _siteTab = tab is not null && SiteTabs.Items.Any(i => (string)i.Tag == tab) ? tab
@@ -476,6 +487,7 @@ public sealed partial class ForgeWindow : Window
         SiteConfig.Visibility = _siteTab == "config" ? Visibility.Visible : Visibility.Collapsed;
         DeployPanel.Visibility = _siteTab == "deploy" ? Visibility.Visible : Visibility.Collapsed;
         RenderDeploy(site);
+        SslPanel.Visibility = _siteTab == "ssl" ? Visibility.Visible : Visibility.Collapsed;
         HeartbeatsPanel.Visibility = _siteTab == "heartbeats" ? Visibility.Visible : Visibility.Collapsed;
         CommandPanel.Visibility = _siteTab == "command" ? Visibility.Visible : Visibility.Collapsed;
         RunButton.IsEnabled = CommandBox.Text.Trim() != "" && !_sending;
@@ -563,6 +575,9 @@ public sealed partial class ForgeWindow : Window
                 break;
             case "deploy":
                 LoadDeploy(gen);
+                break;
+            case "ssl":
+                LoadCertificates(gen);
                 break;
             case "heartbeats":
             {
@@ -911,22 +926,43 @@ public sealed partial class ForgeWindow : Window
 
     // --------------------------------------------------------------- server
 
-    private void SelectServer(string org, string serverId)
+    private void SelectServer(string org, string serverId, string? tab = null)
     {
         if (_org == org && _siteKey == "" && _serverId == serverId) return;
         _org = org;
         _siteKey = "";
         _serverId = serverId;
-        _serverTab = "services";
-        _syncing = true;
-        ServerTabs.SelectedItem = ServerTabs.Items[0];
-        _syncing = false;
+        _serverTab = IsServerTab(tab) ? tab : "services";
+        SelectServerTabItem();
         SiteConfig.Reset();
         ServerEvents.Reset();
         ServerLogs.Reset();
         ServerProcesses.Reset();
         ServerJobs.Reset();
+        ResetAccess();
         Render();
+        LoadServerTab();
+    }
+
+    private void ShowServerTab(string tab)
+    {
+        _serverTab = tab;
+        SelectServerTabItem();
+        // Only a write grants extra looks at a key or rule still applying; opening a tab doesn't.
+        _accessRechecks = 0;
+        RenderPage();
+        LoadServerTab();
+    }
+
+    private bool IsServerTab([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? tab) =>
+        tab is not null && ServerTabs.Items.Any(i => (string)i.Tag == tab);
+
+    /// <summary>Shows <see cref="_serverTab"/> as the selected tab without raising a tab change.</summary>
+    private void SelectServerTabItem()
+    {
+        _syncing = true;
+        ServerTabs.SelectedItem = ServerTabs.Items.First(i => (string)i.Tag == _serverTab);
+        _syncing = false;
     }
 
     private void RenderServer(Server server)
@@ -947,7 +983,10 @@ public sealed partial class ForgeWindow : Window
         ServerLogs.Visibility = _serverTab == "logs" ? Visibility.Visible : Visibility.Collapsed;
         ServerProcesses.Visibility = _serverTab == "processes" ? Visibility.Visible : Visibility.Collapsed;
         ServerJobs.Visibility = _serverTab == "schedule" ? Visibility.Visible : Visibility.Collapsed;
+        SshKeysPanel.Visibility = _serverTab == "ssh-keys" ? Visibility.Visible : Visibility.Collapsed;
+        FirewallPanel.Visibility = _serverTab == "firewall" ? Visibility.Visible : Visibility.Collapsed;
         if (_serverTab == "services") RenderServices(server);
+        RenderAccess(server);
     }
 
     /// <summary>One card per write the server type allows: what it does, why not when it can't, and its button.</summary>
@@ -1014,6 +1053,7 @@ public sealed partial class ForgeWindow : Window
     {
         if (_syncing) return;
         _serverTab = sender.SelectedItem?.Tag as string ?? "services";
+        _accessRechecks = 0;
         RenderPage();
         LoadServerTab();
     }
@@ -1027,6 +1067,8 @@ public sealed partial class ForgeWindow : Window
             case "logs": LoadServerLogKinds(); break;
             case "processes": LoadProcesses(null); break;
             case "schedule": LoadJobs(ServerJobs, null, site: false); break;
+            case "ssh-keys": LoadSshKeys(++_loadGen); break;
+            case "firewall": LoadFirewall(++_loadGen); break;
         }
     }
 

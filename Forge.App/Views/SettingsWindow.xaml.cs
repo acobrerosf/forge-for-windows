@@ -418,6 +418,61 @@ public sealed partial class SettingsWindow : Window
 
     private void TokenLink_Click(object sender, RoutedEventArgs e) => Shell.OpenUrl("https://forge.laravel.com/profile/api");
 
+    /// <summary>
+    /// The scopes the app uses, so a token is made with those and nothing more: the three it needs to
+    /// watch anything, then the opt-in ones grouped by what they change.
+    /// </summary>
+    private async void ScopesLink_Click(object sender, RoutedEventArgs e)
+    {
+        var list = new StackPanel { Spacing = 4 };
+        void Heading(string text, string caption)
+        {
+            list.Children.Add(new TextBlock
+            {
+                Text = text,
+                Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
+                Margin = new Thickness(0, list.Children.Count == 0 ? 0 : 14, 0, 0),
+            });
+            if (caption != "") list.Children.Add(Caption(caption));
+        }
+        void Row(ScopeInfo scope)
+        {
+            var row = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
+            row.Children.Add(new TextBlock
+            {
+                Text = scope.Name,
+                FontFamily = (FontFamily)Application.Current.Resources["MonoFont"],
+                IsTextSelectionEnabled = true,
+            });
+            row.Children.Add(Caption(scope.Use));
+            list.Children.Add(row);
+        }
+
+        Heading("Needed", "Without these the token check fails, or there is nothing to watch.");
+        foreach (var scope in Scopes.Required) Row(scope);
+        foreach (var (group, scopes) in Scopes.Optional)
+        {
+            Heading(group, group == Scopes.Optional[0].Group
+                ? "Optional. Each one turns on one kind of change; leave out what you won't use."
+                : "");
+            foreach (var scope in scopes) Row(scope);
+        }
+        var closing = Caption("The app uses nothing else, so there is no need for any other scope.");
+        closing.Margin = new Thickness(0, 14, 0, 0);
+        list.Children.Add(closing);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "Token scopes",
+            Content = new ScrollViewer { Content = list, MaxHeight = 460, Padding = new Thickness(0, 0, 12, 0) },
+            CloseButtonText = "Close",
+            DefaultButton = ContentDialogButton.Close,
+            RequestedTheme = ((FrameworkElement)Content).ActualTheme,
+        };
+        await dialog.ShowAsync();
+    }
+
     private void OpenFolder_Click(object sender, RoutedEventArgs e) =>
         Shell.RevealFolder(Path.GetDirectoryName(_service.SetupPath)!);
 

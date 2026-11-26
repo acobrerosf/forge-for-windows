@@ -180,7 +180,13 @@ public sealed partial class ForgeService : IAsyncDisposable
         token = token.Trim();
         if (token == "") return (null, [], "Paste a token first");
         var userEnv = await _client.SendAsync("GET", Paths.User(), token, null, ct).ConfigureAwait(false);
-        if (!userEnv.Ok) return (null, [], userEnv.Status == 401 ? "Forge rejected that token" : userEnv.ErrorMessage);
+        if (!userEnv.Ok)
+            return (null, [], userEnv.Status switch
+            {
+                401 => "Forge rejected that token",
+                403 => Scopes.MissingMessage(Scopes.UserView),
+                _ => userEnv.ErrorMessage,
+            });
         var user = Parse.User(userEnv.Body);
 
         var orgs = new List<Organization>();
@@ -188,7 +194,10 @@ public sealed partial class ForgeService : IAsyncDisposable
         for (var page = 0; page < 10; page++)
         {
             var env = await _client.SendAsync("GET", Paths.Orgs(cursor), token, null, ct).ConfigureAwait(false);
-            if (!env.Ok) return (user, orgs, "Could not list organizations: " + env.ErrorMessage);
+            if (!env.Ok)
+                return (user, orgs, env.Status == 403
+                    ? Scopes.MissingMessage(Scopes.OrganizationView)
+                    : "Could not list organizations: " + env.ErrorMessage);
             orgs.AddRange(Parse.Organizations(env.Body));
             cursor = Parse.NextCursor(env.Body);
             if (cursor == "") break;

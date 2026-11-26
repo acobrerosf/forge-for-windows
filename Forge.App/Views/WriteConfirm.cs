@@ -79,6 +79,7 @@ internal static class WriteConfirm
     /// <summary>The dialog's wording for an action from a server's or site's list.</summary>
     public static (string Title, string Body, string Cta) Wording(ActionSpec spec, string subject)
     {
+        if (spec.Wording is { } own) return own;
         var what = spec.ArmedText.StartsWith("press Y to ", StringComparison.Ordinal) ? spec.ArmedText["press Y to ".Length..] : spec.Label;
         return spec.Id switch
         {

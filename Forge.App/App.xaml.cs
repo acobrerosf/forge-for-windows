@@ -144,14 +144,14 @@ public partial class App : Application
     private void TogglePanel() => _panel?.Toggle();
 
     /// <summary>The expanded window: one at a time, made on first use and dropped when closed.</summary>
-    private void OpenWindow(string? org, string? siteKey, string? tab = null)
+    private void OpenWindow(string? org, string? siteKey, string? tab = null, string? serverId = null)
     {
         if (_window is null)
         {
             _window = new ForgeWindow(_service, OpenSettings);
             _window.Closed += (_, _) => _window = null;
         }
-        _window.ShowAndFocus(org, siteKey, tab);
+        _window.ShowAndFocus(org, siteKey, tab, serverId);
     }
 
     private void OpenSettings()
